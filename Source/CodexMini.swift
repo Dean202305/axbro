@@ -427,12 +427,20 @@ struct Dashboard: View {
             }.padding(.bottom, 6)
 
             Group {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                HStack(alignment: .center, spacing: 12) {
                     Text(snapshot.usage?.primary?.percent ?? "--%")
                         .font(.system(size: 42, weight: .semibold, design: .rounded)).monospacedDigit()
+                        .lineLimit(1).minimumScaleFactor(0.85)
                         .foregroundColor(stale ? Palette.secondary : .white)
-                    Text(snapshot.usage?.primary?.label ?? "剩余用量")
-                        .font(.system(size: 12)).foregroundColor(Palette.secondary)
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(alignment: .firstTextBaseline, spacing: 5) {
+                            Text("倒计时").foregroundColor(Palette.secondary)
+                            Text(countdown).fontWeight(.semibold).monospacedDigit()
+                        }.font(.system(size: 12)).lineLimit(1).minimumScaleFactor(0.8)
+                        Text(snapshot.usage?.primary?.label ?? "剩余用量")
+                            .font(.system(size: 12)).foregroundColor(Palette.secondary)
+                            .lineLimit(1).minimumScaleFactor(0.75)
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(.trailing, 50)
                 }.padding(.bottom, 10)
                 QuotaBar(window: snapshot.usage?.primary, stale: stale).padding(.bottom, 18)
                 HStack {
@@ -443,29 +451,25 @@ struct Dashboard: View {
                 }.padding(.bottom, 8)
                 QuotaBar(window: snapshot.usage?.secondary, stale: stale).padding(.bottom, 16)
             }
-            Rectangle().fill(Palette.line).frame(height: 1).padding(.bottom, 12)
-
-            HStack(spacing: 8) {
-                Text("可用重置").foregroundColor(Palette.secondary)
-                Text(snapshot.usage?.resetCount.map { "\($0) 次" } ?? "—")
-                    .fontWeight(.semibold).monospacedDigit()
-                Spacer(minLength: 10)
-                Text("倒计时").foregroundColor(Palette.secondary)
-                Text(countdown).fontWeight(.semibold).monospacedDigit()
-            }.font(.system(size: 12)).padding(.bottom, 10)
-
+            Rectangle().fill(Palette.line).frame(height: 1).padding(.bottom, 10)
             VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("可用重置").foregroundColor(Palette.secondary)
+                    Spacer()
+                    Text(snapshot.usage?.resetCount.map { "\($0) 次" } ?? "—")
+                        .fontWeight(.semibold).monospacedDigit()
+                }
                 HStack {
                     Text("短期重置").foregroundColor(Palette.secondary)
                     Spacer()
-                    Text(resetTime(snapshot.usage?.primary))
+                    Text(resetTime(snapshot.usage?.primary)).monospacedDigit()
                 }
                 HStack {
                     Text("每周重置").foregroundColor(Palette.secondary)
                     Spacer()
-                    Text(resetTime(snapshot.usage?.secondary))
+                    Text(resetTime(snapshot.usage?.secondary)).monospacedDigit()
                 }
-            }.font(.system(size: 10)).padding(.bottom, 10)
+            }.font(.system(size: 10)).padding(.bottom, 8)
 
 
             if !snapshot.usageMessage.isEmpty {
