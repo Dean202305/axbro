@@ -334,20 +334,22 @@ struct PanelBackdrop: View {
     var body: some View {
         ZStack {
             if model.backgroundTransparency > 0 { FrostedPanelBackdrop() }
-            if model.weatherEnabled && model.backgroundTransparency >= 0.5 {
-                Color(red: 0.145, green: 0.16, blue: 0.19).opacity(1 - model.backgroundTransparency)
+            if model.weatherEnabled {
+                if model.backgroundTransparency >= 0.5 {
+                    Color(red: 0.145, green: 0.16, blue: 0.19).opacity(1 - model.backgroundTransparency)
+                } else {
+                    WeatherBackdrop(reading: weather.reading, now: model.now, opacity: 1 - model.backgroundTransparency, showsArtwork: showsWeatherIcon)
+                }
                 if showsWeatherIcon {
                     VStack {
                         HStack {
                             Spacer()
-                            OutlineWeatherIcon(reading: weather.reading, now: model.now)
-                                .frame(width: 34, height: 34).padding(.top, 35).padding(.trailing, 12)
+                            WeatherBadge(reading: weather.reading, now: model.now)
+                                .padding(.top, 32).padding(.trailing, 5)
                         }
                         Spacer()
                     }
                 }
-            } else if model.weatherEnabled {
-                WeatherBackdrop(reading: weather.reading, now: model.now, opacity: 1 - model.backgroundTransparency, showsArtwork: showsWeatherIcon)
             } else {
                 Color(red: 0.08, green: 0.12, blue: 0.17).opacity(1 - model.backgroundTransparency)
             }
@@ -463,7 +465,7 @@ struct Dashboard: View {
                         Text(snapshot.usage?.primary?.label ?? "剩余用量")
                             .font(.system(size: 11)).foregroundColor(Palette.secondary)
                             .lineLimit(1).minimumScaleFactor(0.75)
-                    }.frame(maxWidth: .infinity, alignment: .leading).padding(.trailing, 34)
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(.trailing, 42)
                 }.frame(height: 44).padding(.bottom, 6)
                 QuotaBar(window: snapshot.usage?.primary, stale: stale).padding(.bottom, 10)
                 HStack {
@@ -618,7 +620,7 @@ struct SettingsView: View {
                         }
                         Slider(value: $model.backgroundTransparency, in: 0...1)
                             .accessibilityLabel("背景通透度")
-                        Text("50% 及以上：简洁天气图标。\n低于 50%：随天气与昼夜变化的背景。\n所有页面共享毛玻璃及背景颜色。")
+                        Text("图标随天气与昼夜切换，透明度不改变图标。\n50% 及以上为简洁背景，低于 50% 为天气背景。\n所有页面共享毛玻璃及背景颜色。")
                             .font(.system(size: 10)).foregroundColor(Palette.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1095,6 +1097,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                let value = Double(CommandLine.arguments[index + 1]) {
                 model.backgroundTransparency = min(1, max(0, value))
             }
+            if let index = CommandLine.arguments.firstIndex(of: "--time-preview"), CommandLine.arguments.count > index + 1,
+               let date = ISO8601DateFormatter().date(from: CommandLine.arguments[index + 1]) { model.now = date }
             model.snapshot = try JSONDecoder().decode(Snapshot.self, from: Data(contentsOf: URL(fileURLWithPath: inputPath)))
             if let index = CommandLine.arguments.firstIndex(of: "--weather-preview"), CommandLine.arguments.count > index + 1,
                let data = try? Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[index + 1])),

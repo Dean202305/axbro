@@ -7,7 +7,8 @@
 - 波形数字胶囊显示本机任务数；空闲与未知状态单独呈现，悬停查看说明。
 - 固定到桌面，记住固定状态与窗口位置。
 - 低用量和重置声音提醒，可选择系统提示音，点击即播放。
-- 定位城市与温度、原始比例天气图标；所有页面统一字体、圆角、毛玻璃与天气底色。
+- 定位城市与温度，天气图标及下方中文说明随天气与昼夜变化，独立于背景通透度。
+- 白天保留原始比例天气素材，夜间晴天显示月亮；所有页面共享天气底色与毛玻璃。
 - 设置旁的快捷菜单可打开或退出 Codex。
 - 随 Codex 启动和退出；仅使用安装者自己的本机数据。
 
@@ -33,6 +34,8 @@
 ```sh
 python3 Source/test_monitor.py
 python3 Source/test-local-isolation.py
+xcrun swiftc -parse-as-library Source/Weather.swift Source/test_weather.swift -o /tmp/axbro-weather-tests -framework AppKit -framework SwiftUI -framework CoreLocation
+/tmp/axbro-weather-tests
 ```
 
 ## 数据说明

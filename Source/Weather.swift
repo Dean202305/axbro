@@ -12,7 +12,7 @@ enum WeatherKind: String, Codable {
         case 45, 48: self = .fog
         case 51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82: self = .rain
         case 71, 73, 75, 77, 85, 86: self = .snow
-        case 95, 96, 99: self = .thunder
+        case 95, 96, 97, 99: self = .thunder
         default: self = .unknown
         }
     }
@@ -40,30 +40,91 @@ enum WeatherKind: String, Codable {
     }
 }
 
+struct WeatherPresentation: Equatable {
+    enum Icon: Equatable { case reference(Int), moon, moonCloud }
+    let icon: Icon
+    let label: String
+    let isDay: Bool
+
+    static func make(code: Int?, isDay: Bool) -> WeatherPresentation {
+        let icon: Icon
+        let label: String
+        switch code {
+        case 0: icon = isDay ? .reference(5) : .moon; label = "晴"
+        case 1: icon = isDay ? .reference(10) : .moonCloud; label = "晴间多云"
+        case 2: icon = isDay ? .reference(9) : .moonCloud; label = "多云"
+        case 3: icon = .reference(6); label = "阴"
+        case 45: icon = .reference(8); label = "雾"
+        case 48: icon = .reference(8); label = "雾凇"
+        case 51, 53, 55: icon = .reference(1); label = "毛毛雨"
+        case 56, 57: icon = .reference(12); label = "冻毛毛雨"
+        case 61: icon = .reference(11); label = "小雨"
+        case 63: icon = .reference(11); label = "中雨"
+        case 65: icon = .reference(11); label = "大雨"
+        case 66, 67: icon = .reference(12); label = "冻雨"
+        case 71: icon = .reference(13); label = "小雪"
+        case 73: icon = .reference(13); label = "中雪"
+        case 75: icon = .reference(13); label = "大雪"
+        case 77: icon = .reference(7); label = "雪粒"
+        case 80, 81: icon = .reference(11); label = "阵雨"
+        case 82: icon = .reference(11); label = "强阵雨"
+        case 85, 86: icon = .reference(3); label = "阵雪"
+        case 95: icon = .reference(14); label = "雷雨"
+        case 97: icon = .reference(14); label = "强雷雨"
+        case 96, 99: icon = .reference(14); label = "雷雨冰雹"
+        default: icon = .reference(15); label = "天气未知"
+        }
+        return WeatherPresentation(icon: icon, label: label, isDay: isDay)
+    }
+}
+
 struct WeatherReading: Codable {
     var temperature: Double
     var code: Int
     var sunrise: [Double]
     var sunset: [Double]
     var fetchedAt: Double
+    var timezoneIdentifier: String? = nil
+    var reportedIsDay: Bool? = nil
+    var reportedAt: Double? = nil
     var kind: WeatherKind { WeatherKind(code: code) }
     func isDay(at date: Date) -> Bool {
         let time = date.timeIntervalSince1970
-        for (rise, set) in zip(sunrise, sunset) where time >= rise - 12 * 3600 && time <= set + 12 * 3600 {
-            return time >= rise && time < set
-        }
-        return (6..<18).contains(Calendar.current.component(.hour, from: date))
+        let intervals = zip(sunrise, sunset).filter { $0.0.isFinite && $0.1.isFinite && $0.1 > $0.0 }
+        // Check every daylight interval before interpreting the gaps as night.
+        // Yesterday's extended night window must not hide today's sunrise.
+        if intervals.contains(where: { time >= $0.0 && time < $0.1 }) { return true }
+        if let first = intervals.map({ $0.0 }).min(), let last = intervals.map({ $0.1 }).max(),
+           time >= first - 12 * 3600 && time <= last + 12 * 3600 { return false }
+        if let reportedIsDay = reportedIsDay, let reportedAt = reportedAt,
+           abs(time - reportedAt) < 3600 { return reportedIsDay }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timezoneIdentifier.flatMap(TimeZone.init(identifier:)) ?? .autoupdatingCurrent
+        return (6..<18).contains(calendar.component(.hour, from: date))
+    }
+    func presentation(at date: Date) -> WeatherPresentation {
+        WeatherPresentation.make(code: code, isDay: isDay(at: date))
     }
 }
 
 struct WeatherResponse: Decodable {
-    struct Current: Decodable { let temperature_2m: Double; let weather_code: Int }
+    struct Current: Decodable {
+        let temperature_2m: Double
+        let weather_code: Int
+        let is_day: Int?
+        let time: Double?
+    }
     struct Daily: Decodable { let sunrise: [Double]; let sunset: [Double] }
     let current: Current
     let daily: Daily
+    let timezone: String?
     func reading(now: Double) -> WeatherReading {
         WeatherReading(temperature: current.temperature_2m, code: current.weather_code,
-                       sunrise: daily.sunrise, sunset: daily.sunset, fetchedAt: now)
+                       sunrise: daily.sunrise, sunset: daily.sunset, fetchedAt: now,
+                       timezoneIdentifier: timezone, reportedIsDay: current.is_day.flatMap { value -> Bool? in
+                           value == 1 ? true : value == 0 ? false : nil
+                       },
+                       reportedAt: current.time)
     }
 }
 
@@ -158,7 +219,7 @@ final class WeatherController: NSObject, ObservableObject, CLLocationManagerDele
         components.queryItems = [
             URLQueryItem(name: "latitude", value: String(format: "%.2f", coordinate.latitude)),
             URLQueryItem(name: "longitude", value: String(format: "%.2f", coordinate.longitude)),
-            URLQueryItem(name: "current", value: "temperature_2m,weather_code"),
+            URLQueryItem(name: "current", value: "temperature_2m,weather_code,is_day"),
             URLQueryItem(name: "daily", value: "sunrise,sunset"),
             URLQueryItem(name: "timezone", value: "auto"),
             URLQueryItem(name: "timeformat", value: "unixtime"),
@@ -226,41 +287,6 @@ struct WeatherBackdrop: View {
                         context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 1.5, height: 1.5)), with: .color(.white.opacity(0.55)))
                     }
                 }
-                let center = CGPoint(x: size.width - 29, y: 52)
-                if kind == .clear || kind == .cloudy {
-                    let orb = CGRect(x: center.x - 13, y: center.y - 13, width: 26, height: 26)
-                    context.fill(Path(ellipseIn: orb), with: .color(day ? Color(red: 1, green: 0.78, blue: 0.32).opacity(0.55) : .white.opacity(0.45)))
-                    if !day {
-                        context.fill(Path(ellipseIn: orb.offsetBy(dx: 12, dy: -8)), with: .color(upper))
-                    } else {
-                        for ray in 0..<8 {
-                            let angle = Double(ray) * .pi / 4
-                            var line = Path()
-                            line.move(to: CGPoint(x: center.x + cos(angle) * 18, y: center.y + sin(angle) * 18))
-                            line.addLine(to: CGPoint(x: center.x + cos(angle) * 22, y: center.y + sin(angle) * 22))
-                            context.stroke(line, with: .color(Color.yellow.opacity(0.3)), lineWidth: 2)
-                        }
-                    }
-                }
-                if kind != .clear {
-                    var cloud = Path()
-                    cloud.addEllipse(in: CGRect(x: size.width - 145, y: 53, width: 66, height: 38))
-                    cloud.addEllipse(in: CGRect(x: size.width - 112, y: 30, width: 78, height: 65))
-                    cloud.addEllipse(in: CGRect(x: size.width - 64, y: 48, width: 75, height: 45))
-                    cloud.addRoundedRect(in: CGRect(x: size.width - 120, y: 66, width: 126, height: 28), cornerSize: CGSize(width: 14, height: 14))
-                    context.fill(cloud, with: .color(.white.opacity(kind == .cloudy ? 0.22 : 0.14)))
-                }
-                if kind == .thunder {
-                    var bolt = Path()
-                    bolt.move(to: CGPoint(x: size.width - 60, y: 80))
-                    bolt.addLine(to: CGPoint(x: size.width - 82, y: 115))
-                    bolt.addLine(to: CGPoint(x: size.width - 68, y: 112))
-                    bolt.addLine(to: CGPoint(x: size.width - 87, y: 145))
-                    bolt.addLine(to: CGPoint(x: size.width - 45, y: 100))
-                    bolt.addLine(to: CGPoint(x: size.width - 60, y: 101))
-                    bolt.closeSubpath()
-                    context.fill(bolt, with: .color(.yellow.opacity(0.35)))
-                }
                 if kind == .rain || kind == .thunder {
                     for i in 0..<25 {
                         let x = CGFloat((i * 47 + 17) % 300) / 300 * size.width
@@ -285,24 +311,79 @@ struct WeatherBackdrop: View {
     }
 }
 
-/// Uses the supplied pixels; aspect-fit preserves the original icon geometry.
-struct OutlineWeatherIcon: View {
+/// The same weather and daylight selection is used at every transparency level.
+struct WeatherBadge: View {
     let reading: WeatherReading?
     let now: Date
+    private var presentation: WeatherPresentation {
+        reading?.presentation(at: now) ?? WeatherPresentation.make(code: nil, isDay: true)
+    }
+    var body: some View {
+        VStack(spacing: 2) {
+            OutlineWeatherIcon(presentation: presentation).frame(width: 34, height: 34)
+            Text(presentation.label).font(.system(size: 8.5, weight: .medium))
+                .foregroundColor(.white.opacity(0.86)).lineLimit(1).minimumScaleFactor(0.8)
+                .frame(width: 48)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(presentation.label)，\(presentation.isDay ? "白天" : "夜间")")
+        .allowsHitTesting(false)
+    }
+}
 
+/// Reference sprites stay aspect-fit; night variants reuse the original cloud.
+struct OutlineWeatherIcon: View {
+    let presentation: WeatherPresentation
     var body: some View {
         Group {
-            if let image = ReferenceWeatherArtwork.images[ReferenceWeatherArtwork.key(code: reading?.code)] {
-                Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+            switch presentation.icon {
+            case .reference(let key):
+                reference(key)
+            case .moon:
+                CrescentWeatherIcon()
+            case .moonCloud:
+                ZStack {
+                    CrescentWeatherIcon().frame(width: 23, height: 23).position(x: 23, y: 11.5)
+                    reference(6).frame(width: 31, height: 23).position(x: 15.5, y: 22.5)
+                }.frame(width: 34, height: 34)
             }
         }.accessibilityHidden(true).allowsHitTesting(false)
+    }
+    @ViewBuilder private func reference(_ key: Int) -> some View {
+        if let image = ReferenceWeatherArtwork.images[key] {
+            Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+        }
+    }
+}
+
+struct CrescentWeatherIcon: View {
+    var body: some View {
+        Canvas { context, size in
+            let scale = min(size.width, size.height) / 34
+            let outer = CGPoint(x: 17 * scale, y: 17 * scale)
+            let inner = CGPoint(x: 27 * scale, y: 11 * scale)
+            let distance = sqrt(136.0)
+            let height = sqrt(191.0)
+            let top = CGPoint(x: (22 - height * 6 / distance) * scale, y: (14 - height * 10 / distance) * scale)
+            let bottom = CGPoint(x: (22 + height * 6 / distance) * scale, y: (14 + height * 10 / distance) * scale)
+            var moon = Path()
+            moon.addArc(center: outer, radius: 15 * scale,
+                        startAngle: .radians(atan2(top.y - outer.y, top.x - outer.x)),
+                        endAngle: .radians(atan2(bottom.y - outer.y, bottom.x - outer.x)), clockwise: true)
+            moon.addArc(center: inner, radius: 15 * scale,
+                        startAngle: .radians(atan2(bottom.y - inner.y, bottom.x - inner.x)),
+                        endAngle: .radians(atan2(top.y - inner.y, top.x - inner.x)), clockwise: false)
+            moon.closeSubpath()
+            context.fill(moon, with: .color(Color(red: 0.84, green: 0.86, blue: 0.92)))
+        }
     }
 }
 
 enum ReferenceWeatherArtwork {
     static func key(code: Int?) -> Int {
         switch code {
-        case 0, 1: return 5
+        case 0: return 5
+        case 1: return 10
         case 2: return 9
         case 3: return 6
         case 45, 48: return 8
@@ -312,7 +393,7 @@ enum ReferenceWeatherArtwork {
         case 71, 73, 75: return 13
         case 77: return 7
         case 85, 86: return 3
-        case 95, 96, 99: return 14
+        case 95, 96, 97, 99: return 14
         default: return 15
         }
     }
