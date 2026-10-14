@@ -10,7 +10,7 @@ cp Runtime/CodexMiniLifecycle "$PACKAGE/Runtime/CodexMiniLifecycle"
 cp 设置随Codex启动.command "$PACKAGE/安装.command"
 cp 取消随Codex启动.command "$PACKAGE/取消自动关联.command"
 cat > "$PACKAGE/安装说明.txt" <<'TXT'
-axbro 1.14.3 — 仅支持 Codex，macOS 13+，Intel 与 Apple 芯片通用版
+axbro 1.14.4 — 仅支持 Codex，macOS 13+，Intel 与 Apple 芯片通用版
 
 双击“安装.command”，安装到当前用户 Applications，启用随 Codex 启动与退出。
 读取额度需要本机已登录的 Codex，以及 Python 3（Homebrew 或 Command Line Tools）。

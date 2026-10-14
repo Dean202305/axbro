@@ -321,6 +321,38 @@ struct FrostedPanelBackdrop: NSViewRepresentable {
     func updateNSView(_ view: NSVisualEffectView, context: Context) {}
 }
 
+/// All surfaces share the same live weather palette, material and tint strength.
+struct PanelBackdrop: View {
+    @ObservedObject var model: Telemetry
+    @ObservedObject private var weather: WeatherController
+    var showsWeatherIcon = false
+    init(model: Telemetry, showsWeatherIcon: Bool = false) {
+        self.model = model; self.weather = model.weather; self.showsWeatherIcon = showsWeatherIcon
+    }
+    var body: some View {
+        ZStack {
+            if model.backgroundTransparency > 0 { FrostedPanelBackdrop() }
+            if model.weatherEnabled && model.backgroundTransparency >= 0.5 {
+                Color(red: 0.145, green: 0.16, blue: 0.19).opacity(1 - model.backgroundTransparency)
+                if showsWeatherIcon {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            OutlineWeatherIcon(reading: weather.reading, now: model.now)
+                                .frame(width: 50, height: 50).padding(.top, 34).padding(.trailing, 14)
+                        }
+                        Spacer()
+                    }
+                }
+            } else if model.weatherEnabled {
+                WeatherBackdrop(reading: weather.reading, now: model.now, opacity: 1 - model.backgroundTransparency, showsArtwork: showsWeatherIcon)
+            } else {
+                Color(red: 0.08, green: 0.12, blue: 0.17).opacity(1 - model.backgroundTransparency)
+            }
+        }.allowsHitTesting(false)
+    }
+}
+
 struct Dashboard: View {
     @ObservedObject var model: Telemetry
     @ObservedObject private var weather: WeatherController
@@ -458,20 +490,7 @@ struct Dashboard: View {
         .padding(.bottom, 12)
         .frame(width: 300)
         .foregroundColor(.white)
-        .background {
-            ZStack {
-                if model.backgroundTransparency > 0 { FrostedPanelBackdrop() }
-            if model.weatherEnabled && model.backgroundTransparency >= 0.5 {
-                Color(red: 0.145, green: 0.16, blue: 0.19).opacity(1 - model.backgroundTransparency)
-                    .overlay(alignment: .topTrailing) {
-                        OutlineWeatherIcon(reading: weather.reading, now: model.now)
-                            .frame(width: 50, height: 50)
-                            .padding(.top, 34).padding(.trailing, 14)
-                    }
-            } else if model.weatherEnabled { WeatherBackdrop(reading: weather.reading, now: model.now, opacity: 1 - model.backgroundTransparency) }
-            else { Color(red: 0.08, green: 0.12, blue: 0.17).opacity(1 - model.backgroundTransparency) }
-            }
-        }
+        .background { PanelBackdrop(model: model, showsWeatherIcon: true) }
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
         .preferredColorScheme(.dark)
@@ -483,6 +502,7 @@ struct SoundSelector: View {
     let event: ReminderEvent
     let onDone: () -> Void
     var doneTitle: String = "完成"
+    var embedded = false
     private var selection: String { event == .lowUsage ? model.lowUsageSound : model.resetSound }
     var body: some View {
         VStack(spacing: 10) {
@@ -509,7 +529,10 @@ struct SoundSelector: View {
             }.frame(height: 310)
             Text("点击即播放并保存，可连续切换").font(.system(size: 10)).foregroundColor(Palette.secondary)
         }
-        .padding(14).frame(width: 230).foregroundColor(.white).preferredColorScheme(.dark)
+        .padding(14).frame(width: 230).foregroundColor(.white)
+        .background { if !embedded { PanelBackdrop(model: model) } }
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .preferredColorScheme(.dark)
     }
 }
 
@@ -525,9 +548,9 @@ struct SettingsView: View {
     var body: some View {
         Group {
             if showingAbout {
-                AboutView(model: model, onDone: { showingAbout = false })
+                AboutView(model: model, onDone: { showingAbout = false }, embedded: true)
             } else if let event = soundSelection {
-                SoundSelector(model: model, event: event, onDone: { soundSelection = nil }, doneTitle: "返回设置")
+                SoundSelector(model: model, event: event, onDone: { soundSelection = nil }, doneTitle: "返回设置", embedded: true)
             } else {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
@@ -581,7 +604,8 @@ struct SettingsView: View {
         .buttonStyle(.borderless)
         .tint(Palette.green)
         .foregroundColor(.white)
-        .background(Color(red: 0.08, green: 0.12, blue: 0.17))
+        .background { PanelBackdrop(model: model) }
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .preferredColorScheme(.dark)
     }
     private func soundRow(_ title: String, name: String, event: ReminderEvent) -> some View {
@@ -606,6 +630,7 @@ func openCodex() {
 struct AboutView: View {
     @ObservedObject var model: Telemetry
     let onDone: () -> Void
+    var embedded = false
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -629,7 +654,9 @@ struct AboutView: View {
         .fixedSize(horizontal: false, vertical: true)
         .padding(16).frame(width: 270)
         .buttonStyle(.borderless).tint(Palette.green).foregroundColor(.white)
-        .background(Color(red: 0.08, green: 0.12, blue: 0.17)).preferredColorScheme(.dark)
+        .background { if !embedded { PanelBackdrop(model: model) } }
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .preferredColorScheme(.dark)
     }
 }
 

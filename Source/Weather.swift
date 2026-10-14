@@ -206,6 +206,7 @@ struct WeatherBackdrop: View {
     let reading: WeatherReading?
     let now: Date
     var opacity: Double = 0.5
+    var showsArtwork = true
     private var day: Bool { reading?.isDay(at: now) ?? (6..<18).contains(Calendar.current.component(.hour, from: now)) }
     var body: some View {
         Canvas { context, size in
@@ -217,7 +218,7 @@ struct WeatherBackdrop: View {
             else { upper = Color(red: 0.10, green: 0.32, blue: 0.49) }
             let bottom = Color(red: 0.035, green: 0.075, blue: 0.15)
             context.fill(Path(CGRect(origin: .zero, size: size)), with: .linearGradient(Gradient(colors: [upper, bottom]), startPoint: .zero, endPoint: CGPoint(x: size.width * 0.3, y: size.height)))
-            if kind != .unknown {
+            if kind != .unknown && showsArtwork {
                 if !day && (kind == .clear || kind == .cloudy) {
                     for i in 0..<26 {
                         let x = CGFloat((i * 67 + 19) % 300) / 300 * size.width
