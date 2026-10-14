@@ -334,17 +334,76 @@ enum ReferenceWeatherArtwork {
                   let context = CGContext(data: pixels, width: 140, height: height, bitsPerComponent: 8, bytesPerRow: 560,
                     space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { continue }
             context.draw(crop, in: CGRect(x: 0, y: 0, width: 140, height: height))
-            // Remove only the sheet's flat background; retain the supplied line artwork.
-            let background = (Int(pixels[0]), Int(pixels[1]), Int(pixels[2]))
-            var minX = 140, minY = 140, maxX = 0, maxY = 0
-            for y in 0..<height {
-                for x in 0..<140 {
-                    let offset = y * 560 + x * 4
-                    let difference = max(abs(Int(pixels[offset]) - background.0),
-                        abs(Int(pixels[offset + 1]) - background.1), abs(Int(pixels[offset + 2]) - background.2))
-                    pixels[offset + 3] = difference <= 12 ? 0 : 255
-                    if difference <= 12 { pixels[offset] = 0; pixels[offset + 1] = 0; pixels[offset + 2] = 0 }
-                    if difference > 12 { minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y) }
+            // Recover fractional coverage from the sheet's original ink colours.
+            // Premultiplied output removes the dark matte instead of preserving it at edges.
+            let background = (0..<3).map { channel -> Double in
+                let corners = [0, 139 * 4, (height - 1) * 560, (height - 1) * 560 + 139 * 4]
+                return Double(corners.map { Int(pixels[$0 + channel]) }.sorted()[1])
+            }
+            var swatches = [[[Double]]] (repeating: [], count: 3)
+            for offset in stride(from: 0, to: height * 560, by: 4) {
+                let rgb = (0..<3).map { Double(pixels[offset + $0]) }
+                if rgb.min()! > 200 && rgb.max()! - rgb.min()! < 35 { swatches[0].append(rgb) }
+                else if rgb[0] > 180 && rgb[0] > rgb[1] * 1.15 && rgb[1] > rgb[2] * 1.5 { swatches[1].append(rgb) }
+                else if rgb[2] > 140 && rgb[1] > rgb[0] * 1.3 && rgb[2] > rgb[0] * 1.3 { swatches[2].append(rgb) }
+            }
+            let fallback = [[246.0, 247, 246], [246.0, 177, 48], [88.0, 174, 202]]
+            let palette = swatches.enumerated().map { index, samples -> [Double] in
+                guard samples.count >= 8 else { return fallback[index] }
+                return (0..<3).map { channel in samples.map { $0[channel] }.sorted()[samples.count / 2] }
+            }
+            var coverage = [Double](repeating: 0, count: 140 * height)
+            var ink = [Int](repeating: 0, count: coverage.count)
+            for pixel in coverage.indices {
+                let rgb = (0..<3).map { Double(pixels[pixel * 4 + $0]) }
+                var bestError = Double.infinity
+                for (index, colour) in palette.enumerated() {
+                    let vector = (0..<3).map { colour[$0] - background[$0] }
+                    let dot = (0..<3).reduce(0.0) { $0 + (rgb[$1] - background[$1]) * vector[$1] }
+                    let norm = vector.reduce(0.0) { $0 + $1 * $1 }
+                    let alpha = min(1, max(0, dot / norm))
+                    let error = (0..<3).reduce(0.0) { total, channel in
+                        let residual = rgb[channel] - background[channel] - alpha * vector[channel]
+                        return total + residual * residual
+                    }
+                    if error < bestError { bestError = error; coverage[pixel] = alpha; ink[pixel] = index }
+                }
+            }
+            // Retain connected linework with a solid core, including its soft edge.
+            // Isolated compression noise has neither enough area nor a strong core.
+            var visited = [Bool](repeating: false, count: coverage.count)
+            var keep = [Bool](repeating: false, count: coverage.count)
+            for start in coverage.indices where !visited[start] && coverage[start] >= 0.08 {
+                var component = [start]
+                visited[start] = true
+                var cursor = 0, hasCore = false
+                while cursor < component.count {
+                    let pixel = component[cursor]; cursor += 1
+                    hasCore = hasCore || coverage[pixel] >= 0.55
+                    let x = pixel % 140, y = pixel / 140
+                    for dy in -1...1 {
+                        for dx in -1...1 where dx != 0 || dy != 0 {
+                            let nx = x + dx, ny = y + dy
+                            guard nx >= 0, nx < 140, ny >= 0, ny < height else { continue }
+                            let neighbour = ny * 140 + nx
+                            if !visited[neighbour] && coverage[neighbour] >= 0.08 {
+                                visited[neighbour] = true; component.append(neighbour)
+                            }
+                        }
+                    }
+                }
+                if hasCore && component.count >= 5 { for pixel in component { keep[pixel] = true } }
+            }
+            var minX = 140, minY = height, maxX = 0, maxY = 0
+            for pixel in coverage.indices {
+                let alpha = keep[pixel] ? coverage[pixel] : 0
+                for channel in 0..<3 {
+                    pixels[pixel * 4 + channel] = UInt8((palette[ink[pixel]][channel] * alpha).rounded())
+                }
+                pixels[pixel * 4 + 3] = UInt8((alpha * 255).rounded())
+                if alpha > 0 {
+                    let x = pixel % 140, y = pixel / 140
+                    minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
                 }
             }
             guard minX <= maxX, minY <= maxY, let cg = bitmap.cgImage,
