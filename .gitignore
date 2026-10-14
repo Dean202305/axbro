@@ -1,0 +1,8 @@
+.DS_Store
+.build/
+Runtime/
+dist/
+*.app/
+*.zip
+__pycache__/
+*.pyc

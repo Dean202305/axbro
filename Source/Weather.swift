@@ -1,0 +1,358 @@
+import AppKit
+import SwiftUI
+import CoreLocation
+import Combine
+
+enum WeatherKind: String, Codable {
+    case clear, cloudy, fog, rain, snow, thunder, unknown
+    init(code: Int) {
+        switch code {
+        case 0, 1: self = .clear
+        case 2, 3: self = .cloudy
+        case 45, 48: self = .fog
+        case 51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82: self = .rain
+        case 71, 73, 75, 77, 85, 86: self = .snow
+        case 95, 96, 99: self = .thunder
+        default: self = .unknown
+        }
+    }
+    var title: String {
+        switch self {
+        case .clear: return "晴"
+        case .cloudy: return "多云"
+        case .fog: return "雾"
+        case .rain: return "雨"
+        case .snow: return "雪"
+        case .thunder: return "雷雨"
+        case .unknown: return "天气未知"
+        }
+    }
+    func symbol(day: Bool) -> String {
+        switch self {
+        case .clear: return day ? "sun.max.fill" : "moon.stars.fill"
+        case .cloudy: return day ? "cloud.sun.fill" : "cloud.moon.fill"
+        case .fog: return "cloud.fog.fill"
+        case .rain: return "cloud.rain.fill"
+        case .snow: return "cloud.snow.fill"
+        case .thunder: return "cloud.bolt.rain.fill"
+        case .unknown: return "location"
+        }
+    }
+}
+
+struct WeatherReading: Codable {
+    var temperature: Double
+    var code: Int
+    var sunrise: [Double]
+    var sunset: [Double]
+    var fetchedAt: Double
+    var kind: WeatherKind { WeatherKind(code: code) }
+    func isDay(at date: Date) -> Bool {
+        let time = date.timeIntervalSince1970
+        for (rise, set) in zip(sunrise, sunset) where time >= rise - 12 * 3600 && time <= set + 12 * 3600 {
+            return time >= rise && time < set
+        }
+        return (6..<18).contains(Calendar.current.component(.hour, from: date))
+    }
+}
+
+struct WeatherResponse: Decodable {
+    struct Current: Decodable { let temperature_2m: Double; let weather_code: Int }
+    struct Daily: Decodable { let sunrise: [Double]; let sunset: [Double] }
+    let current: Current
+    let daily: Daily
+    func reading(now: Double) -> WeatherReading {
+        WeatherReading(temperature: current.temperature_2m, code: current.weather_code,
+                       sunrise: daily.sunrise, sunset: daily.sunset, fetchedAt: now)
+    }
+}
+
+final class WeatherController: NSObject, ObservableObject, CLLocationManagerDelegate {
+    @Published var reading: WeatherReading?
+    @Published var place = "当前位置"
+    @Published var message = "等待定位"
+    @Published private(set) var authorizationMessage = "未授权"
+    private let manager = CLLocationManager()
+    private let geocoder = CLGeocoder()
+    private var lastLocation: CLLocation?
+    private var timer: Timer?
+    private var request: URLSessionDataTask?
+    private var requestGeneration = 0
+    private var started = false
+    private var asked = false
+
+    override init() {
+        super.init()
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyThreeKilometers
+        updateAuthorizationMessage()
+    }
+
+    func start() {
+        guard !started else { return }
+        started = true
+        refresh()
+        timer = Timer.scheduledTimer(withTimeInterval: 15 * 60, repeats: true) { [weak self] _ in self?.refresh() }
+    }
+
+    func refresh() {
+        switch manager.authorizationStatus {
+        case .notDetermined:
+            message = "等待定位授权"
+            if !asked {
+                asked = true
+                NSApplication.shared.activate(ignoringOtherApps: true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.manager.requestWhenInUseAuthorization() }
+            }
+        case .denied, .restricted:
+            reading = nil
+            message = "定位未授权"
+        case .authorizedAlways, .authorizedWhenInUse:
+            message = reading == nil ? "正在定位" : message
+            manager.requestLocation()
+        @unknown default:
+            message = "定位暂不可用"
+        }
+    }
+
+    private func updateAuthorizationMessage() {
+        switch manager.authorizationStatus {
+        case .notDetermined: authorizationMessage = "未授权"
+        case .denied, .restricted: authorizationMessage = "未允许"
+        case .authorizedAlways, .authorizedWhenInUse: authorizationMessage = "已允许"
+        @unknown default: authorizationMessage = "未知"
+        }
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        updateAuthorizationMessage()
+        if started { refresh() }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard started, let location = locations.last, location.horizontalAccuracy >= 0,
+              abs(location.timestamp.timeIntervalSinceNow) < 300 else { return }
+        let moved = lastLocation.map { location.distance(from: $0) > 5000 } ?? true
+        lastLocation = location
+        if moved {
+            geocoder.cancelGeocode()
+            geocoder.reverseGeocodeLocation(location, preferredLocale: Locale(identifier: "zh_CN")) { [weak self] places, _ in
+                DispatchQueue.main.async {
+                    if let first = places?.first { self?.place = first.locality ?? first.administrativeArea ?? "当前位置" }
+                }
+            }
+        }
+        fetch(location.coordinate)
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        guard started else { return }
+        message = reading == nil ? "定位暂不可用" : "上次天气"
+        // A previous authorized coordinate can still refresh weather without inventing a location.
+        if let location = lastLocation { fetch(location.coordinate) }
+    }
+
+    private func fetch(_ coordinate: CLLocationCoordinate2D) {
+        guard request == nil else { return }
+        guard var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast") else { return }
+        components.queryItems = [
+            URLQueryItem(name: "latitude", value: String(format: "%.2f", coordinate.latitude)),
+            URLQueryItem(name: "longitude", value: String(format: "%.2f", coordinate.longitude)),
+            URLQueryItem(name: "current", value: "temperature_2m,weather_code"),
+            URLQueryItem(name: "daily", value: "sunrise,sunset"),
+            URLQueryItem(name: "timezone", value: "auto"),
+            URLQueryItem(name: "timeformat", value: "unixtime"),
+            URLQueryItem(name: "forecast_days", value: "2")
+        ]
+        guard let url = components.url else { return }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 20
+        requestGeneration += 1
+        let generation = requestGeneration
+        request = URLSession.shared.dataTask(with: req) { [weak self] data, response, _ in
+            DispatchQueue.main.async {
+                guard let self = self, self.started, self.requestGeneration == generation else { return }
+                self.request = nil
+                guard (response as? HTTPURLResponse)?.statusCode == 200, let data = data,
+                      let value = try? JSONDecoder().decode(WeatherResponse.self, from: data),
+                      value.current.temperature_2m.isFinite else {
+                    self.message = self.reading == nil ? "天气暂不可用" : "上次天气"
+                    return
+                }
+                self.reading = value.reading(now: Date().timeIntervalSince1970)
+                self.message = ""
+            }
+        }
+        request?.resume()
+    }
+
+    func openLocationSettings() {
+        if manager.authorizationStatus == .notDetermined { asked = false; refresh() }
+        else if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    func stop() {
+        started = false
+        requestGeneration += 1
+        timer?.invalidate(); timer = nil
+        request?.cancel(); request = nil
+        manager.stopUpdatingLocation(); geocoder.cancelGeocode()
+    }
+}
+
+struct WeatherBackdrop: View {
+    let reading: WeatherReading?
+    let now: Date
+    var opacity: Double = 0.5
+    private var day: Bool { reading?.isDay(at: now) ?? (6..<18).contains(Calendar.current.component(.hour, from: now)) }
+    var body: some View {
+        Canvas { context, size in
+            let kind = reading?.kind ?? .unknown
+            let upper: Color
+            if !day { upper = Color(red: 0.08, green: 0.10, blue: 0.29) }
+            else if kind == .rain || kind == .thunder { upper = Color(red: 0.18, green: 0.25, blue: 0.34) }
+            else if kind == .snow || kind == .fog { upper = Color(red: 0.28, green: 0.39, blue: 0.46) }
+            else { upper = Color(red: 0.10, green: 0.32, blue: 0.49) }
+            let bottom = Color(red: 0.035, green: 0.075, blue: 0.15)
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .linearGradient(Gradient(colors: [upper, bottom]), startPoint: .zero, endPoint: CGPoint(x: size.width * 0.3, y: size.height)))
+            if kind != .unknown {
+                if !day && (kind == .clear || kind == .cloudy) {
+                    for i in 0..<26 {
+                        let x = CGFloat((i * 67 + 19) % 300) / 300 * size.width
+                        let y = CGFloat((i * 41 + 13) % 120)
+                        context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 1.5, height: 1.5)), with: .color(.white.opacity(0.55)))
+                    }
+                }
+                let center = CGPoint(x: size.width * 0.84, y: 46)
+                if kind == .clear || kind == .cloudy {
+                    let orb = CGRect(x: center.x - 25, y: center.y - 25, width: 50, height: 50)
+                    context.fill(Path(ellipseIn: orb), with: .color(day ? Color(red: 1, green: 0.78, blue: 0.32).opacity(0.55) : .white.opacity(0.45)))
+                    if !day {
+                        context.fill(Path(ellipseIn: orb.offsetBy(dx: 12, dy: -8)), with: .color(upper))
+                    } else {
+                        for ray in 0..<8 {
+                            let angle = Double(ray) * .pi / 4
+                            var line = Path()
+                            line.move(to: CGPoint(x: center.x + cos(angle) * 31, y: center.y + sin(angle) * 31))
+                            line.addLine(to: CGPoint(x: center.x + cos(angle) * 37, y: center.y + sin(angle) * 37))
+                            context.stroke(line, with: .color(Color.yellow.opacity(0.3)), lineWidth: 2)
+                        }
+                    }
+                }
+                if kind != .clear {
+                    var cloud = Path()
+                    cloud.addEllipse(in: CGRect(x: size.width - 145, y: 53, width: 66, height: 38))
+                    cloud.addEllipse(in: CGRect(x: size.width - 112, y: 30, width: 78, height: 65))
+                    cloud.addEllipse(in: CGRect(x: size.width - 64, y: 48, width: 75, height: 45))
+                    cloud.addRoundedRect(in: CGRect(x: size.width - 120, y: 66, width: 126, height: 28), cornerSize: CGSize(width: 14, height: 14))
+                    context.fill(cloud, with: .color(.white.opacity(kind == .cloudy ? 0.22 : 0.14)))
+                }
+                if kind == .thunder {
+                    var bolt = Path()
+                    bolt.move(to: CGPoint(x: size.width - 60, y: 80))
+                    bolt.addLine(to: CGPoint(x: size.width - 82, y: 115))
+                    bolt.addLine(to: CGPoint(x: size.width - 68, y: 112))
+                    bolt.addLine(to: CGPoint(x: size.width - 87, y: 145))
+                    bolt.addLine(to: CGPoint(x: size.width - 45, y: 100))
+                    bolt.addLine(to: CGPoint(x: size.width - 60, y: 101))
+                    bolt.closeSubpath()
+                    context.fill(bolt, with: .color(.yellow.opacity(0.35)))
+                }
+                if kind == .rain || kind == .thunder {
+                    for i in 0..<25 {
+                        let x = CGFloat((i * 47 + 17) % 300) / 300 * size.width
+                        let y = CGFloat((i * 31 + 60) % 260)
+                        var path = Path(); path.move(to: CGPoint(x: x, y: y)); path.addLine(to: CGPoint(x: x - 5, y: y + 14))
+                        context.stroke(path, with: .color(.white.opacity(0.18)), lineWidth: 1)
+                    }
+                } else if kind == .snow {
+                    for i in 0..<32 {
+                        let x = CGFloat((i * 53 + 11) % 300) / 300 * size.width
+                        let y = CGFloat((i * 37 + 20) % 270)
+                        context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 2.5, height: 2.5)), with: .color(.white.opacity(0.4)))
+                    }
+                } else if kind == .fog {
+                    for i in 0..<5 {
+                        let rect = CGRect(x: -20, y: CGFloat(i * 38 + 40), width: size.width + 40, height: 18)
+                        context.fill(Path(roundedRect: rect, cornerRadius: 9), with: .color(.white.opacity(0.10)))
+                    }
+                }
+            }
+        }.opacity(opacity).accessibilityHidden(true)
+    }
+}
+
+/// Uses the supplied pixels; aspect-fit preserves the original icon geometry.
+struct OutlineWeatherIcon: View {
+    let reading: WeatherReading?
+    let now: Date
+
+    var body: some View {
+        Group {
+            if let image = ReferenceWeatherArtwork.images[ReferenceWeatherArtwork.key(code: reading?.code)] {
+                Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+            }
+        }.accessibilityHidden(true).allowsHitTesting(false)
+    }
+}
+
+enum ReferenceWeatherArtwork {
+    static func key(code: Int?) -> Int {
+        switch code {
+        case 0, 1: return 5
+        case 2: return 9
+        case 3: return 6
+        case 45, 48: return 8
+        case 51, 53, 55: return 1
+        case 56, 57, 66, 67: return 12
+        case 61, 63, 65, 80, 81, 82: return 11
+        case 71, 73, 75: return 13
+        case 77: return 7
+        case 85, 86: return 3
+        case 95, 96, 99: return 14
+        default: return 15
+        }
+    }
+
+    static let images: [Int: NSImage] = {
+        guard let url = Bundle.main.url(forResource: "WeatherReference", withExtension: "png"),
+              let source = NSImage(contentsOf: url),
+              let sheet = source.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return [:] }
+        let columns = [58, 220, 380, 548]
+        let rows = [36, 216, 407, 604]
+        var result: [Int: NSImage] = [:]
+        for index in 0..<16 {
+            let height = index / 4 == 3 ? 122 : 140
+            let rect = CGRect(x: columns[index % 4], y: rows[index / 4], width: 140, height: height)
+            guard let crop = sheet.cropping(to: rect),
+                  let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 140, pixelsHigh: height,
+                    bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                    colorSpaceName: .deviceRGB, bitmapFormat: [], bytesPerRow: 560, bitsPerPixel: 32),
+                  let pixels = bitmap.bitmapData,
+                  let context = CGContext(data: pixels, width: 140, height: height, bitsPerComponent: 8, bytesPerRow: 560,
+                    space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { continue }
+            context.draw(crop, in: CGRect(x: 0, y: 0, width: 140, height: height))
+            // Remove only the sheet's flat background; retain the supplied line artwork.
+            let background = (Int(pixels[0]), Int(pixels[1]), Int(pixels[2]))
+            var minX = 140, minY = 140, maxX = 0, maxY = 0
+            for y in 0..<height {
+                for x in 0..<140 {
+                    let offset = y * 560 + x * 4
+                    let difference = max(abs(Int(pixels[offset]) - background.0),
+                        abs(Int(pixels[offset + 1]) - background.1), abs(Int(pixels[offset + 2]) - background.2))
+                    pixels[offset + 3] = difference <= 12 ? 0 : 255
+                    if difference <= 12 { pixels[offset] = 0; pixels[offset + 1] = 0; pixels[offset + 2] = 0 }
+                    if difference > 12 { minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y) }
+                }
+            }
+            guard minX <= maxX, minY <= maxY, let cg = bitmap.cgImage,
+                  let trimmed = cg.cropping(to: CGRect(x: max(0, minX - 2), y: max(0, minY - 2),
+                    width: min(140 - max(0, minX - 2), maxX - minX + 5),
+                    height: min(height - max(0, minY - 2), maxY - minY + 5))) else { continue }
+            result[index] = NSImage(cgImage: trimmed, size: NSSize(width: trimmed.width, height: trimmed.height))
+        }
+        return result
+    }()
+}
