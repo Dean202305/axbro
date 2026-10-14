@@ -11,7 +11,7 @@
 
 ## 安装
 
-从 [Releases](../../releases) 下载 `axbro-安装包.zip`，解压后双击 `安装.command`。
+从 [Releases](https://github.com/Dean202305/axbro/releases) 下载安装包 ZIP，解压后双击 `安装.command`。
 
 要求 macOS 13+、已登录的 Codex，以及 Python 3（Homebrew 或 Command Line Tools）。安装包支持 Intel 和 Apple 芯片。当前为临时签名，尚未 Apple 公证；Apple 芯片版交叉编译，未在实体机器验证。
 
