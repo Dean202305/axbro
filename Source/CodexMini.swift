@@ -306,6 +306,21 @@ struct HeaderDragHandle: NSViewRepresentable {
     func updateNSView(_ view: DragView, context: Context) { view.enabled = enabled }
 }
 
+/// Blur the whole backdrop consistently; transparent icon holes never need a tile.
+struct FrostedPanelBackdrop: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .hudWindow
+        view.blendingMode = .behindWindow
+        view.state = .active
+        view.wantsLayer = true
+        view.layer?.cornerRadius = 18
+        view.layer?.masksToBounds = true
+        return view
+    }
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+}
+
 struct Dashboard: View {
     @ObservedObject var model: Telemetry
     @ObservedObject private var weather: WeatherController
@@ -444,19 +459,18 @@ struct Dashboard: View {
         .frame(width: 300)
         .foregroundColor(.white)
         .background {
+            ZStack {
+                if model.backgroundTransparency > 0 { FrostedPanelBackdrop() }
             if model.weatherEnabled && model.backgroundTransparency >= 0.5 {
                 Color(red: 0.145, green: 0.16, blue: 0.19).opacity(1 - model.backgroundTransparency)
                     .overlay(alignment: .topTrailing) {
                         OutlineWeatherIcon(reading: weather.reading, now: model.now)
                             .frame(width: 50, height: 50)
-                            // An opaque local backing keeps desktop symbols out of the line art.
-                            .padding(3)
-                            .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color(red: 0.145, green: 0.16, blue: 0.19)))
-                            .padding(.top, 31).padding(.trailing, 11)
+                            .padding(.top, 34).padding(.trailing, 14)
                     }
             } else if model.weatherEnabled { WeatherBackdrop(reading: weather.reading, now: model.now, opacity: 1 - model.backgroundTransparency) }
             else { Color(red: 0.08, green: 0.12, blue: 0.17).opacity(1 - model.backgroundTransparency) }
+            }
         }
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
@@ -550,7 +564,7 @@ struct SettingsView: View {
                         }
                         Slider(value: $model.backgroundTransparency, in: 0...1)
                             .accessibilityLabel("背景透明度")
-                        Text("50% 及以上显示右上角天气图标，低于 50% 显示天气场景")
+                        Text("50% 及以上显示右上角天气图标，低于 50% 显示天气场景。透明背景使用毛玻璃模糊。")
                             .font(.system(size: 10)).foregroundColor(Palette.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
