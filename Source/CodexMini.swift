@@ -448,7 +448,12 @@ struct Dashboard: View {
                 Color(red: 0.145, green: 0.16, blue: 0.19).opacity(1 - model.backgroundTransparency)
                     .overlay(alignment: .topTrailing) {
                         OutlineWeatherIcon(reading: weather.reading, now: model.now)
-                            .frame(width: 50, height: 50).padding(.top, 34).padding(.trailing, 14)
+                            .frame(width: 50, height: 50)
+                            // An opaque local backing keeps desktop symbols out of the line art.
+                            .padding(3)
+                            .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(Color(red: 0.145, green: 0.16, blue: 0.19)))
+                            .padding(.top, 31).padding(.trailing, 11)
                     }
             } else if model.weatherEnabled { WeatherBackdrop(reading: weather.reading, now: model.now, opacity: 1 - model.backgroundTransparency) }
             else { Color(red: 0.08, green: 0.12, blue: 0.17).opacity(1 - model.backgroundTransparency) }
