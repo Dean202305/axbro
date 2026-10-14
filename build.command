@@ -21,8 +21,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>local.dean.CodexMini</string>
 <key>CFBundleName</key><string>axbro</string>
 <key>CFBundleDisplayName</key><string>axbro</string>
-<key>CFBundleVersion</key><string>24</string>
-<key>CFBundleShortVersionString</key><string>1.14.6</string>
+<key>CFBundleVersion</key><string>25</string>
+<key>CFBundleShortVersionString</key><string>1.15.0</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>LSUIElement</key><true/>
 <key>LSMinimumSystemVersion</key><string>13.0</string>

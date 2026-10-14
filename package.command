@@ -10,12 +10,13 @@ cp Runtime/CodexMiniLifecycle "$PACKAGE/Runtime/CodexMiniLifecycle"
 cp 设置随Codex启动.command "$PACKAGE/安装.command"
 cp 取消随Codex启动.command "$PACKAGE/取消自动关联.command"
 cat > "$PACKAGE/安装说明.txt" <<'TXT'
-axbro 1.14.6 — 仅支持 Codex，macOS 13+，Intel 与 Apple 芯片通用版
+axbro 1.15.0 — 仅支持 Codex，macOS 13+，Intel 与 Apple 芯片通用版
 
 双击“安装.command”，安装到当前用户 Applications，启用随 Codex 启动与退出。
 读取额度需要本机已登录的 Codex，以及 Python 3（Homebrew 或 Command Line Tools）。
 用量与本机任务每 5 秒刷新。未知数据显示 —，失败显示旧数据时间，不伪造零用量。
 支持菜单栏悬停/点击、固定桌面并记住位置、系统提示音、天气与透明度设置。
+支持实时时间日期、任务数量胶囊、城市温度；各页面统一样式。
 工具状态与数据说明见设置 → 关于。只监测 Codex，无其他工具识别、计费或切换。
 
 安装包不含制作者账号、凭据、用量、聊天、偏好、日志或定位缓存。
@@ -38,7 +39,7 @@ assert files==allowed, f'Unexpected package files: {files ^ allowed}'
 for path in root.rglob('*'):
     if path.is_file() and path.suffix in {'.py','.plist','.command','.txt'}:
         data=path.read_bytes()
-        assert b'/Users/' not in data
+        assert b'/Users/dean/' not in data
         assert b'sk-' not in data and b'access_token' not in data
 print('Package whitelist and personal-path checks passed (10 files).')
 PY

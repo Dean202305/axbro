@@ -105,6 +105,7 @@ final class Telemetry: ObservableObject {
     var toggleFloating: (() -> Void)?
     var showSoundSelector: ((ReminderEvent) -> Void)?
     var showSettings: (() -> Void)?
+    var showCodexActions: (() -> Void)?
     var onUpdate: (() -> Void)?
 
     func start() {
@@ -267,7 +268,7 @@ final class Telemetry: ObservableObject {
 }
 
 private enum Palette {
-    static let secondary = Color(red: 0.72, green: 0.76, blue: 0.81)
+    static let secondary = Color(red: 0.80, green: 0.83, blue: 0.87)
     static let green = Color(red: 0.32, green: 0.88, blue: 0.48)
     static let amber = Color(red: 1, green: 0.75, blue: 0.32)
     static let line = Color.white.opacity(0.12)
@@ -276,6 +277,7 @@ private enum Palette {
 struct QuotaBar: View {
     let window: QuotaWindow?
     let stale: Bool
+    var height: CGFloat = 6
     private var tint: Color {
         guard !stale, let remaining = window?.remaining else { return Palette.secondary }
         return remaining <= 10 ? .red : remaining <= 25 ? Palette.amber : Palette.green
@@ -283,11 +285,11 @@ struct QuotaBar: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.18))
+                Capsule().fill(Color.white.opacity(0.12))
                 Capsule().fill(tint).frame(width: geometry.size.width * (window?.remaining ?? 0) / 100)
             }
         }
-        .frame(height: 6)
+        .frame(height: height)
         .accessibilityLabel("剩余用量")
         .accessibilityValue(window?.percent ?? "暂无数据")
     }
@@ -339,7 +341,7 @@ struct PanelBackdrop: View {
                         HStack {
                             Spacer()
                             OutlineWeatherIcon(reading: weather.reading, now: model.now)
-                                .frame(width: 42, height: 42).padding(.top, 30).padding(.trailing, 12)
+                                .frame(width: 34, height: 34).padding(.top, 35).padding(.trailing, 12)
                         }
                         Spacer()
                     }
@@ -388,35 +390,55 @@ struct Dashboard: View {
         return elapsed < 5 ? "刚刚更新" : "\(elapsed) 秒前更新"
     }
 
-    private var compactTaskTitle: String {
-        guard let count = snapshot.tasks.count else { return "状态未知" }
-        return count > 0 ? "运行 \(count)" : "空闲"
+    private var currentDate: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.dateFormat = "M月d日"
+        return formatter.string(from: model.now)
+    }
+
+    private var weatherTitle: String {
+        guard model.weatherEnabled else { return "天气已关闭" }
+        guard let reading = weather.reading else { return weather.message }
+        return "\(weather.place) \(Int(reading.temperature.rounded()))°C"
+    }
+    private var weatherDetail: String {
+        guard model.weatherEnabled, let reading = weather.reading else { return weatherTitle }
+        return [weatherTitle, reading.kind.title, weather.message].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 4) {
-                HStack(spacing: 4) {
-                    Image(systemName: model.weatherEnabled ? (weather.reading?.kind.symbol(day: weather.reading?.isDay(at: model.now) ?? true) ?? "location") : "clock")
-                        .font(.system(size: 11)).accessibilityHidden(true)
-                    Text(model.weatherEnabled ? (weather.reading.map { "\(weather.place) \(Int($0.temperature.rounded()))°" } ?? weather.message) : model.now.formatted(date: .omitted, time: .shortened))
-                        .font(.system(size: 10, weight: .medium)).lineLimit(1).minimumScaleFactor(0.7)
-                }.overlay(HeaderDragHandle(enabled: model.desktopFloating))
+                HStack(spacing: 5) {
+                    Text(model.now.formatted(.dateTime.locale(Locale(identifier: "zh_CN")).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))).font(.system(size: 16, weight: .medium, design: .rounded)).monospacedDigit()
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(currentDate)
+                        Text(model.now.formatted(.dateTime.locale(Locale(identifier: "zh_CN")).weekday(.abbreviated))).foregroundColor(Palette.secondary)
+                    }.font(.system(size: 8)).lineLimit(1)
+                }.frame(height: 20).overlay(HeaderDragHandle(enabled: model.desktopFloating))
                 Spacer(minLength: 6)
                 HStack(spacing: 4) {
-                    Circle().fill(statusColor).frame(width: 6, height: 6).accessibilityHidden(true)
-                    Text(compactTaskTitle).font(.system(size: 10, weight: .medium))
-                }.accessibilityLabel(snapshot.tasks.title)
+                    Image(systemName: snapshot.tasks.count == nil ? "questionmark" : (snapshot.tasks.count ?? 0) > 0 ? "waveform.path" : "pause")
+                        .font(.system(size: 10, weight: .medium)).accessibilityHidden(true)
+                    Text(snapshot.tasks.count.map { $0 > 99 ? "99+" : String($0) } ?? "—")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded)).monospacedDigit()
+                }
+                .foregroundColor(statusColor)
+                .padding(.horizontal, 7).frame(height: 19)
+                .background(statusColor.opacity(0.13), in: Capsule())
+                .overlay(Capsule().strokeBorder(statusColor.opacity(0.16), lineWidth: 0.5))
+                .help(snapshot.tasks.title).accessibilityLabel(snapshot.tasks.title)
                 Button { model.showSettings?() } label: {
                     Image(systemName: "gearshape").font(.system(size: 11)).frame(width: 20, height: 20)
                 }.buttonStyle(.borderless).help("设置").accessibilityLabel("设置")
-                Button { openCodex() } label: {
-                    Image(systemName: "arrow.up.forward.app").font(.system(size: 11)).frame(width: 20, height: 20)
-                }.buttonStyle(.borderless).help("打开 Codex").accessibilityLabel("打开 Codex")
-                Button { model.closeCodexApplication() } label: {
-                    Image(systemName: "power").font(.system(size: 11)).frame(width: 20, height: 20)
-                }.buttonStyle(.borderless).disabled(!model.codexRunning)
-                 .help("退出 Codex").accessibilityLabel("退出 Codex")
+                Button { model.showCodexActions?() } label: {
+                    HStack(spacing: 1) {
+                        Image(systemName: "arrow.up.forward.app").font(.system(size: 11))
+                        Image(systemName: "chevron.down").font(.system(size: 6, weight: .semibold))
+                    }.frame(width: 24, height: 20)
+                }.buttonStyle(.borderless).help("打开或退出 Codex").accessibilityLabel("Codex 操作菜单")
                 Button { model.toggleFloating?() } label: {
                     Image(systemName: model.desktopFloating ? "pin.fill" : "pin")
                         .font(.system(size: 12, weight: .medium)).frame(width: 20, height: 20)
@@ -432,24 +454,25 @@ struct Dashboard: View {
                         .font(.system(size: 36, weight: .semibold, design: .rounded)).monospacedDigit()
                         .lineLimit(1).minimumScaleFactor(0.85)
                         .foregroundColor(stale ? Palette.secondary : .white)
+                        .frame(width: 88, alignment: .leading)
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(alignment: .firstTextBaseline, spacing: 4) {
-                            Text("倒计时").foregroundColor(Palette.secondary)
+                            Text("重置").foregroundColor(Palette.secondary)
                             Text(countdown).fontWeight(.semibold).monospacedDigit()
                         }.font(.system(size: 11)).lineLimit(1).minimumScaleFactor(0.8)
                         Text(snapshot.usage?.primary?.label ?? "剩余用量")
                             .font(.system(size: 11)).foregroundColor(Palette.secondary)
                             .lineLimit(1).minimumScaleFactor(0.75)
-                    }.frame(maxWidth: .infinity, alignment: .leading).padding(.trailing, 42)
-                }.padding(.bottom, 6)
-                QuotaBar(window: snapshot.usage?.primary, stale: stale).padding(.bottom, 12)
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(.trailing, 34)
+                }.frame(height: 44).padding(.bottom, 6)
+                QuotaBar(window: snapshot.usage?.primary, stale: stale).padding(.bottom, 10)
                 HStack {
                     Text(snapshot.usage?.secondary?.label ?? "每周剩余").font(.system(size: 11))
                     Spacer()
                     Text(snapshot.usage?.secondary?.percent ?? "--%")
                         .font(.system(size: 13, weight: .medium)).monospacedDigit()
                 }.padding(.bottom, 6)
-                QuotaBar(window: snapshot.usage?.secondary, stale: stale).padding(.bottom, 10)
+                QuotaBar(window: snapshot.usage?.secondary, stale: stale, height: 4).padding(.bottom, 10)
             }
             Rectangle().fill(Palette.line).frame(height: 1).padding(.bottom, 6)
             VStack(alignment: .leading, spacing: 4) {
@@ -469,7 +492,7 @@ struct Dashboard: View {
                     Spacer()
                     Text(resetTime(snapshot.usage?.secondary)).monospacedDigit()
                 }
-            }.font(.system(size: 10)).padding(.bottom, 6)
+            }.font(.system(size: 11)).padding(.bottom, 6)
 
 
             if !snapshot.usageMessage.isEmpty {
@@ -480,10 +503,13 @@ struct Dashboard: View {
                     .font(.system(size: 11)).foregroundColor(Palette.amber).padding(.bottom, 6)
             }
             HStack(spacing: 4) {
+                Image(systemName: model.weatherEnabled ? "location.fill" : "location.slash").font(.system(size: 9)).foregroundColor(Palette.secondary)
+                Text(weatherTitle).font(.system(size: 11, weight: .medium))
+                    .lineLimit(1).minimumScaleFactor(0.8).help(weatherDetail)
+                Spacer()
                 Circle().fill(stale ? Palette.amber : Palette.green).frame(width: 4, height: 4).accessibilityHidden(true)
                 Text(updated).font(.system(size: 9)).foregroundColor(Palette.secondary)
-                Spacer()
-                Text("Codex · 5 秒刷新").font(.system(size: 9)).foregroundColor(Palette.secondary)
+                    .lineLimit(1).minimumScaleFactor(0.8).help(snapshot.usageMessage.isEmpty ? updated : snapshot.usageMessage)
                 Button { model.refresh() } label: {
                     Image(systemName: "arrow.clockwise").font(.system(size: 11)).frame(width: 20, height: 18)
                 }.buttonStyle(.borderless).accessibilityLabel("刷新用量与任务状态").keyboardShortcut("r", modifiers: .command)
@@ -492,7 +518,7 @@ struct Dashboard: View {
         .padding(.horizontal, 12)
         .padding(.top, 8)
         .padding(.bottom, 10)
-        .frame(width: 270)
+        .frame(width: 270).frame(minHeight: 227)
         .foregroundColor(.white)
         .background { PanelBackdrop(model: model, showsWeatherIcon: true) }
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -524,18 +550,19 @@ struct SoundSelector: View {
                                 Spacer()
                                 if selection == name { Image(systemName: "checkmark").foregroundColor(Palette.green) }
                             }
-                            .font(.system(size: 13)).padding(.horizontal, 10).padding(.vertical, 7)
+                            .font(.system(size: 11)).padding(.horizontal, 8).padding(.vertical, 6)
                             .contentShape(Rectangle())
                             .background(selection == name ? Color.white.opacity(0.10) : .clear, in: RoundedRectangle(cornerRadius: 6))
                         }.buttonStyle(.plain).accessibilityValue(selection == name ? "已选择" : "")
                     }
                 }
-            }.frame(height: 280)
+            }.frame(height: 176)
             Text("点击即播放并保存，可连续切换").font(.system(size: 10)).foregroundColor(Palette.secondary)
         }
-        .padding(12).frame(width: 220).foregroundColor(.white)
+        .padding(12).frame(width: 270).foregroundColor(.white)
         .background { if !embedded { PanelBackdrop(model: model) } }
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay { if !embedded { RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.16), lineWidth: 1) } }
         .preferredColorScheme(.dark)
     }
 }
@@ -556,9 +583,9 @@ struct SettingsView: View {
             } else if let event = soundSelection {
                 SoundSelector(model: model, event: event, onDone: { soundSelection = nil }, doneTitle: "返回设置", embedded: true)
             } else {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 10) {
                     HStack {
-                        Text("设置").font(.system(size: 16, weight: .semibold))
+                        Text("设置").font(.system(size: 14, weight: .semibold))
                         Spacer()
                         Button("完成", action: onDone).buttonStyle(.borderless)
                     }
@@ -585,13 +612,13 @@ struct SettingsView: View {
                     }
                     VStack(spacing: 8) {
                         HStack {
-                            Text("背景透明度")
+                            Text("背景通透度")
                             Spacer()
                             Text("\(Int((model.backgroundTransparency * 100).rounded()))%").monospacedDigit()
                         }
                         Slider(value: $model.backgroundTransparency, in: 0...1)
-                            .accessibilityLabel("背景透明度")
-                        Text("50% 及以上显示右上角天气图标，低于 50% 显示天气场景。透明背景使用毛玻璃模糊。")
+                            .accessibilityLabel("背景通透度")
+                        Text("50% 及以上：简洁天气图标。\n低于 50%：随天气与昼夜变化的背景。\n所有页面共享毛玻璃及背景颜色。")
                             .font(.system(size: 10)).foregroundColor(Palette.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -602,7 +629,7 @@ struct SettingsView: View {
                         Spacer()
                         Button("退出看板") { NSApplication.shared.terminate(nil) }
                     }
-                }.font(.system(size: 11)).padding(14).frame(width: 250)
+                }.font(.system(size: 11)).padding(12).frame(width: 270)
             }
         }
         .buttonStyle(.borderless)
@@ -610,6 +637,7 @@ struct SettingsView: View {
         .foregroundColor(.white)
         .background { PanelBackdrop(model: model) }
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
         .preferredColorScheme(.dark)
     }
     private func soundRow(_ title: String, name: String, event: ReminderEvent) -> some View {
@@ -636,31 +664,37 @@ struct AboutView: View {
     let onDone: () -> Void
     var embedded = false
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("关于").font(.system(size: 16, weight: .semibold))
+                Text("关于").font(.system(size: 14, weight: .semibold))
                 Spacer()
-                Button("返回设置", action: onDone)
+                Button("返回", action: onDone)
             }
-            Text("axbro · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
-                .font(.system(size: 12, weight: .semibold))
             HStack {
-                Text("Codex")
+                Text("axbro").font(.system(size: 18, weight: .semibold))
+                Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "").foregroundColor(Palette.secondary)
                 Spacer()
-                Text(model.codexRunning ? "已运行" : "未运行").foregroundColor(Palette.secondary)
+                Circle().fill(model.codexRunning ? Palette.green : Palette.secondary).frame(width: 5, height: 5)
+                Text(model.codexRunning ? "Codex 已运行" : "Codex 未运行").font(.system(size: 10))
             }
-            Text("仅支持 Codex。用量与本机任务状态每 5 秒刷新，随 Codex 启动和退出。")
-            Text("剩余用量低于 5% 时警报；5 小时重置时间到达时声音提醒。")
-            Text("任务数来自当前用户本机日志，等待输入也可能计入；不包括云端、其他设备及内部子代理。运行不代表持续消耗用量。")
-            Text("仅使用安装者当前用户本机数据，安装包不包含制作者的账号、用量或聊天记录。读取额度需要本机 Codex 已登录及 Python 3。")
-        }
-        .font(.system(size: 11))
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(14).frame(width: 250)
+            Divider()
+            aboutText("本机监测", "仅支持 Codex，每 5 秒刷新用量与任务状态，随 Codex 启动和退出。")
+            aboutText("声音提醒", "剩余用量低于 5%、5 小时额度重置时提醒。点击系统提示音即可播放并保存。")
+            aboutText("任务统计", "仅统计当前用户本机日志，等待输入可能计入。运行不代表持续消耗；不含云端、其他设备及内部子代理。")
+            aboutText("数据与环境", "仅使用安装者本机数据，不附带他人账号或聊天记录。需要已登录的 Codex 与 Python 3。")
+        }.font(.system(size: 11)).padding(12).frame(width: 270)
         .buttonStyle(.borderless).tint(Palette.green).foregroundColor(.white)
         .background { if !embedded { PanelBackdrop(model: model) } }
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay { if !embedded { RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.16), lineWidth: 1) } }
         .preferredColorScheme(.dark)
+    }
+    private func aboutText(_ title: String, _ body: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).fontWeight(.medium)
+            Text(body).font(.system(size: 10)).foregroundColor(Palette.secondary)
+                .fixedSize(horizontal: false, vertical: true).lineSpacing(2)
+        }
     }
 }
 
@@ -731,6 +765,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         model.toggleFloating = { [weak self] in self?.toggleDesktopFloating() }
         model.showSettings = { [weak self] in self?.presentSettings() }
+        model.showCodexActions = { [weak self] in self?.presentCodexActions() }
         model.showSoundSelector = { [weak self] event in
             // Wait until the native parent menu has finished its click handling.
             DispatchQueue.main.async { self?.presentSoundSelector(event) }
@@ -815,6 +850,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         settingsPopover?.performClose(nil)
         soundPopover?.performClose(nil)
         if !model.desktopFloating { hidePanel() }
+    }
+
+    private func makeCodexMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let open = menu.addItem(withTitle: "打开 Codex", action: #selector(openMainApp), keyEquivalent: "")
+        open.target = self
+        menu.addItem(.separator())
+        let close = menu.addItem(withTitle: "退出 Codex", action: #selector(closeMainApp), keyEquivalent: "")
+        close.target = self
+        close.isEnabled = model.codexRunning
+        return menu
+    }
+
+    private func presentCodexActions() {
+        // Pin a hover-open panel while its native menu tracks the pointer.
+        showPanel(pinned: true)
+        guard let view = panel?.contentView else { return }
+        let point = NSPoint(x: view.bounds.maxX - 56, y: view.isFlipped ? 28 : view.bounds.maxY - 28)
+        makeCodexMenu().popUp(positioning: nil, at: point, in: view)
     }
 
     private func presentSettings() {
@@ -961,6 +1016,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         else { showPanel(pinned: true) }
     }
     @objc func openMainApp() { openCodex() }
+    @objc func closeMainApp() { model.closeCodexApplication() }
     @objc func refreshData() { model.refresh() }
     @objc func quit() { NSApplication.shared.terminate(nil) }
     func applicationWillTerminate(_ notification: Notification) {
@@ -1001,19 +1057,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         presentSettings()
         let settingsOpened = settingsPopover?.isShown == true
         model.objectWillChange.send() // Selection publishes the same UI-update signal; the list must stay open.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        let previousClock = model.now
+        let codexMenu = makeCodexMenu()
+        let menuWired = codexMenu.items.filter { !$0.isSeparatorItem }.map(\.title) == ["打开 Codex", "退出 Codex"] &&
+            codexMenu.items.first?.action == #selector(openMainApp) && codexMenu.items.last?.action == #selector(closeMainApp)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
             guard let self = self, let panel = self.panel else { return }
             let size = panel.contentView?.bounds.size ?? .zero
             let settingsStaysOpen = self.settingsPopover?.isShown == true
+            let clockTicks = self.model.now > previousClock
             self.settingsPopover?.performClose(nil)
             self.soundPopover?.performClose(nil)
             panel.cancelOperation(nil)
-            self.writeSmokeResult(["passed": hovered && pinned && floating && survivesOutside && retainsPosition && restored && soundListOpened && settingsOpened && settingsStaysOpen && !panel.isVisible && size.width == 270 && size.height < 330,
+            self.writeSmokeResult(["passed": hovered && pinned && floating && survivesOutside && retainsPosition && restored && soundListOpened && settingsOpened && settingsStaysOpen && !panel.isVisible && size.width == 270 && size.height == 227 && clockTicks && menuWired,
                                    "hoverExpanded": hovered, "clickPinned": pinned,
                                    "desktopFloating": floating, "survivesOutsideClick": survivesOutside,
                                    "positionSurvivesRefresh": retainsPosition, "restoredToMenuBar": restored,
                                    "soundListOpened": soundListOpened, "settingsOpened": settingsOpened, "settingsStaysOpen": settingsStaysOpen,
                                    "escapeClosed": !panel.isVisible, "width": size.width, "height": size.height,
+                                   "clockTicks": clockTicks, "codexMenuWired": menuWired,
                                    "quotaLive": self.model.snapshot.usageState == "live"])
         }
     }
@@ -1040,7 +1102,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 model.weather.reading = response.reading(now: Date().timeIntervalSince1970)
                 model.weather.place = "天气演示"
             }
-            let content = CommandLine.arguments.contains("--about-preview")
+            let soundPreview = CommandLine.arguments.contains("--sound-preview")
+            let content = soundPreview
+                ? AnyView(SoundSelector(model: model, event: CommandLine.arguments.contains("--reset-sound") ? .resetDue : .lowUsage, onDone: {}, doneTitle: "返回设置"))
+                : CommandLine.arguments.contains("--about-preview")
                 ? AnyView(AboutView(model: model, onDone: {}))
                 : CommandLine.arguments.contains("--settings-preview")
                     ? AnyView(SettingsView(model: model, onDone: {})) : AnyView(Dashboard(model: model))

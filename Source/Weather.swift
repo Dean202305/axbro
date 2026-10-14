@@ -226,9 +226,9 @@ struct WeatherBackdrop: View {
                         context.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 1.5, height: 1.5)), with: .color(.white.opacity(0.55)))
                     }
                 }
-                let center = CGPoint(x: size.width * 0.84, y: 46)
+                let center = CGPoint(x: size.width - 29, y: 52)
                 if kind == .clear || kind == .cloudy {
-                    let orb = CGRect(x: center.x - 25, y: center.y - 25, width: 50, height: 50)
+                    let orb = CGRect(x: center.x - 13, y: center.y - 13, width: 26, height: 26)
                     context.fill(Path(ellipseIn: orb), with: .color(day ? Color(red: 1, green: 0.78, blue: 0.32).opacity(0.55) : .white.opacity(0.45)))
                     if !day {
                         context.fill(Path(ellipseIn: orb.offsetBy(dx: 12, dy: -8)), with: .color(upper))
@@ -236,8 +236,8 @@ struct WeatherBackdrop: View {
                         for ray in 0..<8 {
                             let angle = Double(ray) * .pi / 4
                             var line = Path()
-                            line.move(to: CGPoint(x: center.x + cos(angle) * 31, y: center.y + sin(angle) * 31))
-                            line.addLine(to: CGPoint(x: center.x + cos(angle) * 37, y: center.y + sin(angle) * 37))
+                            line.move(to: CGPoint(x: center.x + cos(angle) * 18, y: center.y + sin(angle) * 18))
+                            line.addLine(to: CGPoint(x: center.x + cos(angle) * 22, y: center.y + sin(angle) * 22))
                             context.stroke(line, with: .color(Color.yellow.opacity(0.3)), lineWidth: 2)
                         }
                     }
