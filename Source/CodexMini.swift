@@ -280,6 +280,7 @@ struct QuotaRing: View {
     let stale: Bool
     let caption: String
     var emphasis: Double = 1
+    var lineWidth: CGFloat = 6
     private var tint: Color {
         guard !stale, let remaining = window?.remaining else { return Palette.secondary }
         if remaining < 5 { return .red }
@@ -289,15 +290,15 @@ struct QuotaRing: View {
     var body: some View {
         VStack(spacing: 2) {
             ZStack {
-                Circle().stroke(.white.opacity(0.10), lineWidth: 4)
+                Circle().stroke(.white.opacity(0.10), lineWidth: lineWidth)
                 Circle().trim(from: 0, to: (window?.remaining ?? 0) / 100)
-                    .stroke(tint.opacity(emphasis), style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                    .stroke(tint.opacity(emphasis), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                 Text(window?.percent ?? "—%")
                     .font(.system(size: 25, weight: .semibold, design: .rounded)).monospacedDigit()
                     .foregroundColor(stale ? Palette.secondary : .white)
-                    .lineLimit(1).minimumScaleFactor(0.75).frame(width: 62)
-            }.padding(2).frame(width: 78, height: 78)
+                    .lineLimit(1).minimumScaleFactor(0.75).frame(width: min(56, 78 - 2 * lineWidth - 6))
+            }.padding(lineWidth / 2).frame(width: 78, height: 78)
             Text(caption).font(.system(size: 10, weight: .medium)).foregroundColor(Palette.secondary)
                 .lineLimit(1).minimumScaleFactor(0.75).frame(height: 12)
         }.frame(width: 82)
@@ -507,8 +508,8 @@ struct Dashboard: View {
             }.frame(height: 22).padding(.bottom, 6)
 
             HStack(alignment: .top, spacing: 19) {
-                QuotaRing(window: snapshot.usage?.primary, stale: stale, caption: primaryCaption)
-                QuotaRing(window: snapshot.usage?.secondary, stale: stale, caption: snapshot.usage?.secondary?.label ?? "每周剩余", emphasis: 0.82)
+                QuotaRing(window: snapshot.usage?.primary, stale: stale, caption: primaryCaption, lineWidth: 8)
+                QuotaRing(window: snapshot.usage?.secondary, stale: stale, caption: snapshot.usage?.secondary?.label ?? "每周剩余", emphasis: 0.82, lineWidth: 6)
                 weatherColumn
             }.frame(height: 92).padding(.bottom, 4)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
