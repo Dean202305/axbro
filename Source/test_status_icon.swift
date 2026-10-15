@@ -42,6 +42,8 @@ import AppKit
         let text = NSRect(x: 16, y: 0, width: 37, height: 18)
         let marker = NSRect(x: 53, y: 7, width: 3, height: 4)
         let red: (NSColor) -> Bool = { $0.alphaComponent > 0.5 && $0.redComponent > $0.greenComponent * 1.5 }
+        let chromatic: (NSColor) -> Bool = { $0.alphaComponent > 0.5 && max($0.redComponent, $0.greenComponent, $0.blueComponent) - min($0.redComponent, $0.greenComponent, $0.blueComponent) > 0.25 }
+        let amber: (NSColor) -> Bool = { $0.alphaComponent > 0.5 && $0.redComponent > 0.8 && $0.greenComponent > 0.6 && $0.blueComponent < 0.4 }
         let green: (NSColor) -> Bool = { $0.alphaComponent > 0.5 && $0.greenComponent > $0.redComponent * 1.5 }
         let visible: (NSColor) -> Bool = { $0.alphaComponent > 0.2 }
         let bright: (NSColor) -> Bool = { $0.alphaComponent > 0.5 && $0.redComponent > 0.7 && $0.greenComponent > 0.7 && $0.blueComponent > 0.7 }
@@ -66,15 +68,32 @@ import AppKit
         let half = raster(StatusQuotaIndicator(remaining: 50))
         let low = raster(StatusQuotaIndicator(remaining: 4.9))
         let threshold = raster(StatusQuotaIndicator(remaining: 5))
-        check(pixels(full, in: ring, matching: green) > 350, "A full quota must draw a visible complete ring")
-        check(pixels(full, in: ring, matching: green) > pixels(half, in: ring, matching: green) * 17 / 10,
-              "Remaining quota controls the visible ring arc")
+        check(pixels(full, in: ring, matching: green) > 350, "100 percent has a green logo mark")
+        check(pixels(full, in: ring, matching: chromatic) > pixels(half, in: ring, matching: chromatic) * 14 / 10,
+              "Remaining quota controls the colored bowl arc")
+        check(pixels(half, in: ring, matching: amber) > 100, "The midpoint transitions through amber")
         check(pixels(low, in: ring, matching: red) > 5 && pixels(low, in: ring, matching: green) == 0,
-              "Quota below 5 percent turns the ring red")
-        check(pixels(threshold, in: ring, matching: green) > 5 && pixels(threshold, in: ring, matching: red) == 0,
-              "Exactly 5 percent keeps the green ring")
-        check(pixels(raster(zero), in: ring, matching: green) == 0 && pixels(raster(zero), in: ring, matching: red) == 0,
-              "Zero quota must not draw a positive remaining arc")
+              "Very low quota has a red arc and logo dot")
+        check(pixels(threshold, in: ring, matching: red) > 5 && pixels(threshold, in: ring, matching: green) == 0,
+              "Five percent is near the red end of the continuous scale")
+        check(pixels(raster(zero), in: ring, matching: green) == 0 && pixels(raster(zero), in: ring, matching: red) > 350,
+              "A genuine zero remains visibly red instead of disappearing")
+        let fullColor = StatusQuotaIndicator(remaining: 100).usageColor!
+        let zeroColor = zero.usageColor!
+        check(fullColor.greenComponent > fullColor.redComponent && zeroColor.redComponent > zeroColor.greenComponent,
+              "The two endpoints correspond to green and red")
+        check(StatusQuotaIndicator(remaining: nil).usageColor == nil && StatusQuotaIndicator(remaining: 100, isStale: true).usageColor == nil,
+              "Unknown and stale data do not advertise a live quota color")
+        var previous = zeroColor
+        for value in stride(from: 5.0, through: 100.0, by: 5.0) {
+            let color = StatusQuotaIndicator(remaining: value).usageColor!
+            check(color.greenComponent >= previous.greenComponent && color.redComponent <= previous.redComponent &&
+                  abs(color.redComponent - previous.redComponent) < 0.08 && abs(color.greenComponent - previous.greenComponent) < 0.06,
+                  "Quota colors change continuously without threshold jumps")
+            previous = color
+        }
+        check(pixels(full, in: NSRect(x: 11.2, y: 12, width: 1.7, height: 3), matching: green) > 40,
+              "The brand a retains its upright stem at menu bar scale")
         check(pixels(raster(missing), in: ring, matching: green) == 0, "Unavailable quota has no fresh green arc")
 
         let stale = StatusQuotaIndicator(remaining: 50, isStale: true)
@@ -116,7 +135,7 @@ import AppKit
             let destination = URL(fileURLWithPath: CommandLine.arguments[1])
             try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
             let states: [(String, Double?, Bool)] = [
-                ("100%", 100, false), ("58%", 58, false), ("5%", 5, false),
+                ("100%", 100, false), ("50%", 50, false), ("5%", 5, false),
                 ("<5%", 4, false), ("0%", 0, false), ("Unknown", nil, false), ("Stale", 58, true)
             ]
             let sheetSize = NSSize(width: 620, height: 210)
