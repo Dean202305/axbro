@@ -225,7 +225,7 @@ class Monitor:
                                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
             os.set_blocking(self.process.stdout.fileno(), False)
             self.selector.register(self.process.stdout, selectors.EVENT_READ, 'server')
-            self.send('initialize', {'clientInfo': {'name': 'axbro', 'title': 'axbro', 'version': '1.15.1'},
+            self.send('initialize', {'clientInfo': {'name': 'axbro', 'title': 'axbro', 'version': '1.16.0'},
                                      'capabilities': {'experimentalApi': True}})
         except OSError:
             self.close_server()

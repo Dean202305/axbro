@@ -710,6 +710,7 @@ final class DashboardPanel: NSPanel {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let model = Telemetry()
     private var statusItem: NSStatusItem?
+    private var statusAppearanceObserver: StatusQuotaAppearanceObserver?
     private var panel: DashboardPanel?
     private var previewWindow: NSWindow?
     private var soundPopover: NSPopover?
@@ -736,10 +737,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             NSApplication.shared.terminate(nil)
             return
         }
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        let item = NSStatusBar.system.statusItem(withLength: StatusQuotaIndicator.itemLength)
         statusItem = item
         if let button = item.button {
-            button.title = "—%"
+            button.title = ""
+            button.imagePosition = .imageOnly
             button.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
             button.target = self
             button.action = #selector(togglePanel)
@@ -748,7 +750,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
             button.addTrackingArea(area)
             tracking = area
+            let appearanceObserver = StatusQuotaAppearanceObserver(frame: .zero)
+            appearanceObserver.setAccessibilityElement(false)
+            appearanceObserver.onChange = { [weak self] in self?.updateStatus() }
+            button.addSubview(appearanceObserver)
+            statusAppearanceObserver = appearanceObserver
         }
+        updateStatus()
         let host = NSHostingView(rootView: Dashboard(model: model))
         let window = DashboardPanel(contentRect: NSRect(origin: .zero, size: host.fittingSize),
                                     styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -803,10 +811,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func updateStatus() {
+        guard let button = statusItem?.button else { return }
         let snapshot = model.snapshot
-        let title = snapshot.usage?.primary?.percent ?? "—%"
-        statusItem?.button?.title = title + (snapshot.usageState == "stale" ? "·" : "")
-        statusItem?.button?.setAccessibilityValue("Codex，剩余用量 \(title)，\(snapshot.tasks.title)")
+        let indicator = StatusQuotaIndicator(remaining: snapshot.usage?.primary?.remaining,
+                                             isStale: snapshot.usageState != "live")
+        button.image = indicator.image(for: button)
+        button.needsDisplay = true
+        let freshness = indicator.showsStaleMarker ? "，上次数据" : ""
+        let label = snapshot.usage?.primary?.label ?? "剩余用量"
+        button.toolTip = "axbro · \(label)：\(indicator.percentText)\(freshness)\n\(snapshot.tasks.title)\n悬停或点击展开看板"
+        button.setAccessibilityValue("Codex，剩余用量 \(indicator.percentText)\(freshness)，\(snapshot.tasks.title)")
     }
 
     private var buttonFrame: NSRect? {
@@ -1068,16 +1082,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let size = panel.contentView?.bounds.size ?? .zero
             let settingsStaysOpen = self.settingsPopover?.isShown == true
             let clockTicks = self.model.now > previousClock
+            let statusIconVisible = self.statusItem?.button?.image?.size == StatusQuotaIndicator.imageSize &&
+                self.statusItem?.button?.imagePosition == .imageOnly && self.statusItem?.button?.title == "" &&
+                self.statusItem?.length == StatusQuotaIndicator.itemLength
             self.settingsPopover?.performClose(nil)
             self.soundPopover?.performClose(nil)
             panel.cancelOperation(nil)
-            self.writeSmokeResult(["passed": hovered && pinned && floating && survivesOutside && retainsPosition && restored && soundListOpened && settingsOpened && settingsStaysOpen && !panel.isVisible && size.width == 270 && size.height == 227 && clockTicks && menuWired,
+            self.writeSmokeResult(["passed": hovered && pinned && floating && survivesOutside && retainsPosition && restored && soundListOpened && settingsOpened && settingsStaysOpen && !panel.isVisible && size.width == 270 && size.height == 227 && clockTicks && menuWired && statusIconVisible,
                                    "hoverExpanded": hovered, "clickPinned": pinned,
                                    "desktopFloating": floating, "survivesOutsideClick": survivesOutside,
                                    "positionSurvivesRefresh": retainsPosition, "restoredToMenuBar": restored,
                                    "soundListOpened": soundListOpened, "settingsOpened": settingsOpened, "settingsStaysOpen": settingsStaysOpen,
                                    "escapeClosed": !panel.isVisible, "width": size.width, "height": size.height,
-                                   "clockTicks": clockTicks, "codexMenuWired": menuWired,
+                                   "clockTicks": clockTicks, "codexMenuWired": menuWired, "statusIconVisible": statusIconVisible,
                                    "quotaLive": self.model.snapshot.usageState == "live"])
         }
     }

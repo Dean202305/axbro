@@ -2,7 +2,8 @@
 
 仅支持 Codex 的 macOS 菜单栏实时用量看板。
 
-- 菜单栏显示剩余用量，悬停或点击展开，每 5 秒刷新。
+- 菜单栏采用环形进度＋剩余百分比，固定占位、适配深浅色和高亮；悬停或点击展开，每 5 秒刷新。
+- 低于 5% 环形变红；未知显示 —%，过期数据使用灰色环形与点标记。
 - 270 × 227 pt 紧凑主面板，显示实时时间、日期、短期和每周额度及重置倒计时。
 - 波形数字胶囊显示本机任务数；空闲与未知状态单独呈现，悬停查看说明。
 - 固定到桌面，记住固定状态与窗口位置。
@@ -36,6 +37,8 @@ python3 Source/test_monitor.py
 python3 Source/test-local-isolation.py
 xcrun swiftc -parse-as-library Source/Weather.swift Source/test_weather.swift -o /tmp/axbro-weather-tests -framework AppKit -framework SwiftUI -framework CoreLocation
 /tmp/axbro-weather-tests
+xcrun swiftc -parse-as-library Source/StatusQuotaIndicator.swift Source/test_status_icon.swift -o /tmp/axbro-status-tests -framework AppKit
+/tmp/axbro-status-tests
 ```
 
 ## 数据说明
