@@ -10,14 +10,15 @@ cp Runtime/CodexMiniLifecycle "$PACKAGE/Runtime/CodexMiniLifecycle"
 cp 设置随Codex启动.command "$PACKAGE/安装.command"
 cp 取消随Codex启动.command "$PACKAGE/取消自动关联.command"
 cat > "$PACKAGE/安装说明.txt" <<'TXT'
-axbro 1.16.0 — 仅支持 Codex，macOS 13+，Intel 与 Apple 芯片通用版
+axbro 1.17.0 — 仅支持 Codex，macOS 13+，Intel 与 Apple 芯片通用版
 
 双击“安装.command”，安装到当前用户 Applications，启用随 Codex 启动与退出。
 读取额度需要本机已登录的 Codex，以及 Python 3（Homebrew 或 Command Line Tools）。
 菜单栏使用环形进度＋剩余百分比，低于 5% 时环形变红。
 用量与本机任务每 5 秒刷新。未知数据显示 —，失败显示旧数据时间，不伪造零用量。
 支持菜单栏悬停/点击、固定桌面并记住位置、系统提示音、天气与透明度设置。
-支持实时时间日期、任务数量胶囊、城市温度；各页面统一样式。
+主面板采用对齐的双环余量仪表，保留时间日期、任务状态、城市温度和重置信息。
+ChatGPT 标志旁的菜单可打开或退出 Codex；各页面共享背景。
 工具状态与数据说明见设置 → 关于。只监测 Codex，无其他工具识别、计费或切换。
 
 安装包不含制作者账号、凭据、用量、聊天、偏好、日志或定位缓存。
@@ -34,7 +35,8 @@ root=Path(sys.argv[1]); allowed={'安装.command','取消自动关联.command','
 'Runtime/CodexMiniLifecycle','axbro.app/Contents/Info.plist',
 'axbro.app/Contents/MacOS/axbro','axbro.app/Contents/Resources/monitor.py',
 'axbro.app/Contents/Resources/WeatherReference.png','axbro.app/Contents/Resources/AppIcon.icns',
-'axbro.app/Contents/_CodeSignature/CodeResources'}
+'axbro.app/Contents/_CodeSignature/CodeResources',
+'axbro.app/Contents/Resources/ChatGPTMark.png','axbro.app/Contents/Resources/ChatGPTMark@2x.png'}
 files={str(p.relative_to(root)) for p in root.rglob('*') if p.is_file()}
 assert files==allowed, f'Unexpected package files: {files ^ allowed}'
 for path in root.rglob('*'):
@@ -42,7 +44,7 @@ for path in root.rglob('*'):
         data=path.read_bytes()
         assert b'/Users/dean/' not in data
         assert b'sk-' not in data and b'access_token' not in data
-print('Package whitelist and personal-path checks passed (10 files).')
+print('Package whitelist and personal-path checks passed (12 files).')
 PY
 /usr/bin/ditto -c -k --norsrc --noextattr --keepParent "$PACKAGE" axbro-安装包.zip
 echo "已生成：$PWD/axbro-安装包.zip"

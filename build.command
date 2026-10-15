@@ -12,6 +12,7 @@ lipo -create .build/CodexMini-x86_64 .build/CodexMini-arm64 -output "$APP/Conten
 lipo -create .build/Lifecycle-x86_64 .build/Lifecycle-arm64 -output Runtime/CodexMiniLifecycle
 codesign --force --sign - Runtime/CodexMiniLifecycle
 cp Source/Assets/WeatherReference.png "$APP/Contents/Resources/WeatherReference.png"
+cp Source/Assets/ChatGPTMark*.png "$APP/Contents/Resources/"
 cp Source/monitor.py "$APP/Contents/Resources/monitor.py"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -21,8 +22,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>local.dean.CodexMini</string>
 <key>CFBundleName</key><string>axbro</string>
 <key>CFBundleDisplayName</key><string>axbro</string>
-<key>CFBundleVersion</key><string>27</string>
-<key>CFBundleShortVersionString</key><string>1.16.0</string>
+<key>CFBundleVersion</key><string>28</string>
+<key>CFBundleShortVersionString</key><string>1.17.0</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>LSUIElement</key><true/>
 <key>LSMinimumSystemVersion</key><string>13.0</string>

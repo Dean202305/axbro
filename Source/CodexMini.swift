@@ -268,30 +268,42 @@ final class Telemetry: ObservableObject {
 }
 
 private enum Palette {
-    static let secondary = Color(red: 0.80, green: 0.83, blue: 0.87)
-    static let green = Color(red: 0.32, green: 0.88, blue: 0.48)
+    static let secondary = Color(red: 0.76, green: 0.82, blue: 0.89)
+    static let green = Color(red: 0.32, green: 0.88, blue: 0.56)
     static let amber = Color(red: 1, green: 0.75, blue: 0.32)
     static let line = Color.white.opacity(0.12)
 }
 
-struct QuotaBar: View {
+/// Equal-size remaining-quota instruments; a missing window has no colored arc.
+struct QuotaRing: View {
     let window: QuotaWindow?
     let stale: Bool
-    var height: CGFloat = 6
+    let caption: String
+    var emphasis: Double = 1
     private var tint: Color {
         guard !stale, let remaining = window?.remaining else { return Palette.secondary }
-        return remaining <= 10 ? .red : remaining <= 25 ? Palette.amber : Palette.green
+        if remaining < 5 { return .red }
+        if remaining < 20 { return Palette.amber }
+        return Palette.green
     }
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.12))
-                Capsule().fill(tint).frame(width: geometry.size.width * (window?.remaining ?? 0) / 100)
-            }
-        }
-        .frame(height: height)
-        .accessibilityLabel("剩余用量")
-        .accessibilityValue(window?.percent ?? "暂无数据")
+        VStack(spacing: 2) {
+            ZStack {
+                Circle().stroke(.white.opacity(0.10), lineWidth: 4)
+                Circle().trim(from: 0, to: (window?.remaining ?? 0) / 100)
+                    .stroke(tint.opacity(emphasis), style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                Text(window?.percent ?? "—%")
+                    .font(.system(size: 25, weight: .semibold, design: .rounded)).monospacedDigit()
+                    .foregroundColor(stale ? Palette.secondary : .white)
+                    .lineLimit(1).minimumScaleFactor(0.75).frame(width: 62)
+            }.padding(2).frame(width: 78, height: 78)
+            Text(caption).font(.system(size: 10, weight: .medium)).foregroundColor(Palette.secondary)
+                .lineLimit(1).minimumScaleFactor(0.75).frame(height: 12)
+        }.frame(width: 82)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(caption)
+        .accessibilityValue((window?.percent ?? "暂无数据") + (stale ? "，上次读取数据" : ""))
     }
 }
 
@@ -336,7 +348,7 @@ struct PanelBackdrop: View {
             if model.backgroundTransparency > 0 { FrostedPanelBackdrop() }
             if model.weatherEnabled {
                 if model.backgroundTransparency >= 0.5 {
-                    Color(red: 0.145, green: 0.16, blue: 0.19).opacity(1 - model.backgroundTransparency)
+                    Color(red: 0.065, green: 0.085, blue: 0.115).opacity(1 - model.backgroundTransparency)
                 } else {
                     WeatherBackdrop(reading: weather.reading, now: model.now, opacity: 1 - model.backgroundTransparency, showsArtwork: showsWeatherIcon)
                 }
@@ -365,7 +377,7 @@ struct Dashboard: View {
     private var stale: Bool { snapshot.usageState != "live" }
     private var statusColor: Color {
         if snapshot.tasks.count == nil { return Palette.amber }
-        return (snapshot.tasks.count ?? 0) > 0 ? Palette.green : Palette.secondary
+        return (snapshot.tasks.count ?? 0) > 0 ? Palette.green : .white
     }
     private func resetTime(_ window: QuotaWindow?) -> String {
         guard let date = window?.resetDate else { return "暂无数据" }
@@ -386,7 +398,7 @@ struct Dashboard: View {
         return days > 0 ? "\(days)天 \(value)" : value
     }
     private var updated: String {
-        guard let timestamp = snapshot.usageUpdatedAt else { return "连接中" }
+        guard let timestamp = snapshot.usageUpdatedAt else { return snapshot.usageState == "loading" ? "连接中" : "暂无数据" }
         let elapsed = max(0, Int(model.now.timeIntervalSince1970 - timestamp))
         if stale { return "上次数据" }
         return elapsed < 5 ? "刚刚更新" : "\(elapsed) 秒前更新"
@@ -410,119 +422,131 @@ struct Dashboard: View {
         return [weatherTitle, reading.kind.title, weather.message].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
+    private static let chatGPTMark: NSImage = {
+        guard let url = Bundle.main.url(forResource: "ChatGPTMark@2x", withExtension: "png"),
+              let image = NSImage(contentsOf: url) else {
+            preconditionFailure("The application bundle must include the ChatGPT mark asset.")
+        }
+        image.isTemplate = true
+        return image
+    }()
+    private var primaryCaption: String {
+        snapshot.usage?.primary?.label.replacingOccurrences(of: "用量", with: "") ?? "5 小时剩余"
+    }
+    private var weatherColumn: some View {
+        let presentation = weather.reading?.presentation(at: model.now) ?? WeatherPresentation.make(code: nil, isDay: true)
+        return VStack(spacing: 2) {
+            Group {
+                if model.weatherEnabled {
+                    OutlineWeatherIcon(presentation: presentation).frame(width: 36, height: 36)
+                } else {
+                    Image(systemName: "cloud.slash").font(.system(size: 23)).foregroundColor(Palette.secondary)
+                }
+            }.frame(width: 44, height: 78)
+            Text(model.weatherEnabled ? presentation.label : "天气关闭")
+                .font(.system(size: 10, weight: .medium)).foregroundColor(Palette.secondary)
+                .lineLimit(1).minimumScaleFactor(0.8).frame(height: 12)
+        }.frame(width: 44).help(weatherDetail)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(model.weatherEnabled ? "\(presentation.label)，\(presentation.isDay ? "白天" : "夜间")" : "天气已关闭")
+    }
+    private func resetRow(_ label: String, _ window: QuotaWindow?) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label).foregroundColor(Palette.secondary)
+            Spacer()
+            Text(resetTime(window)).monospacedDigit()
+        }.font(.system(size: 10)).frame(height: 12)
+    }
+    private var taskBadge: some View {
+        HStack(spacing: 4) {
+            if let count = snapshot.tasks.count {
+                if count > 0 {
+                    Image(systemName: "waveform.path").font(.system(size: 10, weight: .medium)).accessibilityHidden(true)
+                    Text(count > 99 ? "99+" : String(count)).monospacedDigit()
+                } else {
+                    Text("空闲")
+                }
+            } else {
+                Image(systemName: "questionmark").accessibilityHidden(true)
+                Text("—")
+            }
+        }.font(.system(size: 9.5, weight: .medium))
+            .foregroundColor(statusColor).padding(.horizontal, 6).frame(height: 18)
+            .background(statusColor.opacity(0.10), in: Capsule())
+            .help(snapshot.tasks.title).accessibilityElement(children: .ignore).accessibilityLabel(snapshot.tasks.title)
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 4) {
                 HStack(spacing: 5) {
-                    Text(model.now.formatted(.dateTime.locale(Locale(identifier: "zh_CN")).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))).font(.system(size: 16, weight: .medium, design: .rounded)).monospacedDigit()
+                    Text(model.now.formatted(.dateTime.locale(Locale(identifier: "zh_CN")).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)))
+                        .font(.system(size: 16, weight: .medium, design: .rounded)).monospacedDigit()
                     VStack(alignment: .leading, spacing: 0) {
                         Text(currentDate)
                         Text(model.now.formatted(.dateTime.locale(Locale(identifier: "zh_CN")).weekday(.abbreviated))).foregroundColor(Palette.secondary)
-                    }.font(.system(size: 8)).lineLimit(1)
-                }.frame(height: 20).overlay(HeaderDragHandle(enabled: model.desktopFloating))
-                Spacer(minLength: 6)
-                HStack(spacing: 4) {
-                    Image(systemName: snapshot.tasks.count == nil ? "questionmark" : (snapshot.tasks.count ?? 0) > 0 ? "waveform.path" : "pause")
-                        .font(.system(size: 10, weight: .medium)).accessibilityHidden(true)
-                    Text(snapshot.tasks.count.map { $0 > 99 ? "99+" : String($0) } ?? "—")
-                        .font(.system(size: 10, weight: .semibold, design: .rounded)).monospacedDigit()
-                }
-                .foregroundColor(statusColor)
-                .padding(.horizontal, 7).frame(height: 19)
-                .background(statusColor.opacity(0.13), in: Capsule())
-                .overlay(Capsule().strokeBorder(statusColor.opacity(0.16), lineWidth: 0.5))
-                .help(snapshot.tasks.title).accessibilityLabel(snapshot.tasks.title)
+                    }.font(.system(size: 9)).lineLimit(1)
+                }.overlay(HeaderDragHandle(enabled: model.desktopFloating))
+                Spacer(minLength: 4)
+                taskBadge
                 Button { model.showSettings?() } label: {
-                    Image(systemName: "gearshape").font(.system(size: 11)).frame(width: 20, height: 20)
+                    Image(systemName: "gearshape").font(.system(size: 11)).frame(width: 19, height: 20)
                 }.buttonStyle(.borderless).help("设置").accessibilityLabel("设置")
                 Button { model.showCodexActions?() } label: {
-                    HStack(spacing: 1) {
-                        Image(systemName: "arrow.up.forward.app").font(.system(size: 11))
+                    HStack(spacing: 2) {
+                        Image(nsImage: Self.chatGPTMark).resizable().renderingMode(.template).scaledToFit().frame(width: 14, height: 14)
                         Image(systemName: "chevron.down").font(.system(size: 6, weight: .semibold))
-                    }.frame(width: 24, height: 20)
+                    }.frame(width: 23, height: 20)
                 }.buttonStyle(.borderless).help("打开或退出 Codex").accessibilityLabel("Codex 操作菜单")
                 Button { model.toggleFloating?() } label: {
                     Image(systemName: model.desktopFloating ? "pin.fill" : "pin")
-                        .font(.system(size: 12, weight: .medium)).frame(width: 20, height: 20)
+                        .font(.system(size: 11)).frame(width: 19, height: 20)
                         .foregroundColor(model.desktopFloating ? Palette.green : .white)
                 }.buttonStyle(.borderless)
                  .help(model.desktopFloating ? "返回菜单栏" : "固定到桌面；拖动标题可移动")
                  .accessibilityLabel(model.desktopFloating ? "返回菜单栏" : "固定到桌面")
-            }.padding(.bottom, 6)
+            }.frame(height: 22).padding(.bottom, 6)
 
-            Group {
-                HStack(alignment: .center, spacing: 10) {
-                    Text(snapshot.usage?.primary?.percent ?? "--%")
-                        .font(.system(size: 36, weight: .semibold, design: .rounded)).monospacedDigit()
-                        .lineLimit(1).minimumScaleFactor(0.85)
-                        .foregroundColor(stale ? Palette.secondary : .white)
-                        .frame(width: 88, alignment: .leading)
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(alignment: .firstTextBaseline, spacing: 4) {
-                            Text("重置").foregroundColor(Palette.secondary)
-                            Text(countdown).fontWeight(.semibold).monospacedDigit()
-                        }.font(.system(size: 11)).lineLimit(1).minimumScaleFactor(0.8)
-                        Text(snapshot.usage?.primary?.label ?? "剩余用量")
-                            .font(.system(size: 11)).foregroundColor(Palette.secondary)
-                            .lineLimit(1).minimumScaleFactor(0.75)
-                    }.frame(maxWidth: .infinity, alignment: .leading).padding(.trailing, 42)
-                }.frame(height: 44).padding(.bottom, 6)
-                QuotaBar(window: snapshot.usage?.primary, stale: stale).padding(.bottom, 10)
-                HStack {
-                    Text(snapshot.usage?.secondary?.label ?? "每周剩余").font(.system(size: 11))
-                    Spacer()
-                    Text(snapshot.usage?.secondary?.percent ?? "--%")
-                        .font(.system(size: 13, weight: .medium)).monospacedDigit()
-                }.padding(.bottom, 6)
-                QuotaBar(window: snapshot.usage?.secondary, stale: stale, height: 4).padding(.bottom, 10)
-            }
-            Rectangle().fill(Palette.line).frame(height: 1).padding(.bottom, 6)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("可用重置").foregroundColor(Palette.secondary)
-                    Spacer()
-                    Text(snapshot.usage?.resetCount.map { "\($0) 次" } ?? "—")
-                        .fontWeight(.semibold).monospacedDigit()
-                }
-                HStack {
-                    Text("短期重置").foregroundColor(Palette.secondary)
-                    Spacer()
-                    Text(resetTime(snapshot.usage?.primary)).monospacedDigit()
-                }
-                HStack {
-                    Text("每周重置").foregroundColor(Palette.secondary)
-                    Spacer()
-                    Text(resetTime(snapshot.usage?.secondary)).monospacedDigit()
-                }
-            }.font(.system(size: 11)).padding(.bottom, 6)
-
-
+            HStack(alignment: .top, spacing: 19) {
+                QuotaRing(window: snapshot.usage?.primary, stale: stale, caption: primaryCaption)
+                QuotaRing(window: snapshot.usage?.secondary, stale: stale, caption: snapshot.usage?.secondary?.label ?? "每周剩余", emphasis: 0.82)
+                weatherColumn
+            }.frame(height: 92).padding(.bottom, 4)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("距重置").foregroundColor(Palette.secondary)
+                Text(countdown).fontWeight(.semibold).monospacedDigit()
+                Spacer(minLength: 4)
+                Text("可重置").foregroundColor(Palette.secondary)
+                Text(snapshot.usage?.resetCount.map { "\($0) 次" } ?? "—").fontWeight(.semibold).monospacedDigit()
+            }.font(.system(size: 10.5)).lineLimit(1).minimumScaleFactor(0.8).frame(height: 20)
+            Rectangle().fill(Palette.line).frame(height: 1).padding(.vertical, 5)
+            VStack(spacing: 4) {
+                resetRow("本轮重置", snapshot.usage?.primary)
+                resetRow("每周重置", snapshot.usage?.secondary)
+            }.padding(.bottom, 8)
             if !snapshot.usageMessage.isEmpty {
-                Text(snapshot.usageMessage).font(.system(size: 11)).foregroundColor(Palette.amber)
+                Text(snapshot.usageMessage).font(.system(size: 10)).foregroundColor(Palette.amber)
                     .fixedSize(horizontal: false, vertical: true).padding(.bottom, 6)
             } else if snapshot.usage?.allowed == false {
                 Text("当前账户暂不可使用常规额度")
-                    .font(.system(size: 11)).foregroundColor(Palette.amber).padding(.bottom, 6)
+                    .font(.system(size: 10)).foregroundColor(Palette.amber).padding(.bottom, 6)
             }
             HStack(spacing: 4) {
                 Image(systemName: model.weatherEnabled ? "location.fill" : "location.slash").font(.system(size: 9)).foregroundColor(Palette.secondary)
-                Text(weatherTitle).font(.system(size: 11, weight: .medium))
+                Text(weatherTitle).font(.system(size: 10.5, weight: .medium))
                     .lineLimit(1).minimumScaleFactor(0.8).help(weatherDetail)
-                Spacer()
+                Spacer(minLength: 4)
                 Circle().fill(stale ? Palette.amber : Palette.green).frame(width: 4, height: 4).accessibilityHidden(true)
                 Text(updated).font(.system(size: 9)).foregroundColor(Palette.secondary)
                     .lineLimit(1).minimumScaleFactor(0.8).help(snapshot.usageMessage.isEmpty ? updated : snapshot.usageMessage)
                 Button { model.refresh() } label: {
-                    Image(systemName: "arrow.clockwise").font(.system(size: 11)).frame(width: 20, height: 18)
+                    Image(systemName: "arrow.clockwise").font(.system(size: 11)).frame(width: 19, height: 18)
                 }.buttonStyle(.borderless).accessibilityLabel("刷新用量与任务状态").keyboardShortcut("r", modifiers: .command)
-            }
+            }.frame(height: 18)
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .padding(.bottom, 10)
+        .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 10)
         .frame(width: 270).frame(minHeight: 227)
         .foregroundColor(.white)
-        .background { PanelBackdrop(model: model, showsWeatherIcon: true) }
+        .background { PanelBackdrop(model: model) }
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
         .preferredColorScheme(.dark)
