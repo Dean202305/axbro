@@ -10,10 +10,11 @@ cp Runtime/CodexMiniLifecycle "$PACKAGE/Runtime/CodexMiniLifecycle"
 cp 设置随Codex启动.command "$PACKAGE/安装.command"
 cp 取消随Codex启动.command "$PACKAGE/取消自动关联.command"
 cat > "$PACKAGE/安装说明.txt" <<'TXT'
-axbro 1.17.0 — 仅支持 Codex，macOS 13+，Intel 与 Apple 芯片通用版
+axbro 1.17.1 — 仅支持 Codex，macOS 13+，Intel 与 Apple 芯片通用版
 
 双击“安装.command”，安装到当前用户 Applications，启用随 Codex 启动与退出。
 读取额度需要本机已登录的 Codex，以及 Python 3（Homebrew 或 Command Line Tools）。
+采用独立的 axbro“a＋余量环”应用标志。
 菜单栏使用环形进度＋剩余百分比，低于 5% 时环形变红。
 用量与本机任务每 5 秒刷新。未知数据显示 —，失败显示旧数据时间，不伪造零用量。
 支持菜单栏悬停/点击、固定桌面并记住位置、系统提示音、天气与透明度设置。

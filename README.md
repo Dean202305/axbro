@@ -1,5 +1,7 @@
 # axbro
 
+<img src="Source/Assets/AxbroLogo.png" width="96" height="96" alt="axbro 标志">
+
 仅支持 Codex 的 macOS 菜单栏实时用量看板。
 
 - 菜单栏采用环形进度＋剩余百分比，固定占位、适配深浅色和高亮；悬停或点击展开，每 5 秒刷新。

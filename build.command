@@ -4,6 +4,7 @@ cd "$(dirname "$0")"
 APP="axbro.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 mkdir -p Runtime .build
+./Source/make-app-icon.command
 for ARCH in x86_64 arm64; do
     xcrun swiftc -parse-as-library -O -target "$ARCH-apple-macosx13.0" Source/CodexMini.swift Source/StatusQuotaIndicator.swift Source/ReminderPolicy.swift Source/FloatingPlacement.swift Source/Weather.swift -o ".build/CodexMini-$ARCH" -framework AppKit -framework SwiftUI -framework CoreLocation
     xcrun swiftc -parse-as-library -O -target "$ARCH-apple-macosx13.0" Source/Lifecycle.swift -o ".build/Lifecycle-$ARCH" -framework AppKit
@@ -22,8 +23,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>local.dean.CodexMini</string>
 <key>CFBundleName</key><string>axbro</string>
 <key>CFBundleDisplayName</key><string>axbro</string>
-<key>CFBundleVersion</key><string>28</string>
-<key>CFBundleShortVersionString</key><string>1.17.0</string>
+<key>CFBundleVersion</key><string>29</string>
+<key>CFBundleShortVersionString</key><string>1.17.1</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>LSUIElement</key><true/>
 <key>LSMinimumSystemVersion</key><string>13.0</string>

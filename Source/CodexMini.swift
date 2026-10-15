@@ -689,6 +689,13 @@ struct AboutView: View {
     @ObservedObject var model: Telemetry
     let onDone: () -> Void
     var embedded = false
+    private static let appIcon: NSImage = {
+        guard let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+              let image = NSImage(contentsOf: url) else {
+            preconditionFailure("The application bundle must include its brand icon.")
+        }
+        return image
+    }()
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -696,7 +703,8 @@ struct AboutView: View {
                 Spacer()
                 Button("返回", action: onDone)
             }
-            HStack {
+            HStack(spacing: 5) {
+                Image(nsImage: Self.appIcon).resizable().scaledToFit().frame(width: 24, height: 24).accessibilityHidden(true)
                 Text("axbro").font(.system(size: 18, weight: .semibold))
                 Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "").foregroundColor(Palette.secondary)
                 Spacer()
