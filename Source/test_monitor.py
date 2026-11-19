@@ -2,6 +2,8 @@ import importlib.util
 import json
 import tempfile
 import unittest
+import threading
+from unittest.mock import patch
 from pathlib import Path
 spec = importlib.util.spec_from_file_location('monitor', str(Path(__file__).with_name('monitor.py')))
 m = importlib.util.module_from_spec(spec)
@@ -56,6 +58,26 @@ class UsageTests(unittest.TestCase):
         monitor.unavailable('offline')
         self.assertEqual(monitor.snapshot['usageState'],'stale')
         self.assertIsNotNone(monitor.snapshot['usage'])
+    def test_task_failure_keeps_quota(self):
+        monitor=self.monitor()
+        monitor.apply_usage({'rateLimits':{'primary':{'usedPercent':79,'windowDurationMins':10080},'planType':'prolite'}})
+        with patch.object(monitor.tasks,'scan',side_effect=RuntimeError('unreadable')):
+            monitor.collect_tasks(-1)
+        self.assertEqual(monitor.task_results.get_nowait()['state'],'unknown')
+        self.assertEqual(monitor.snapshot['usageState'],'live')
+    def test_slow_tasks_do_not_delay_quota(self):
+        monitor=self.monitor();ready=threading.Event();release=threading.Event()
+        def slow(_):
+            ready.set();release.wait(2)
+            return {'count':0,'state':'idle','detail':''}
+        with patch.object(monitor.tasks,'scan',side_effect=slow):
+            worker=threading.Thread(target=monitor.collect_tasks,args=(-1,),daemon=True);worker.start()
+            try:
+                self.assertTrue(ready.wait(1))
+                monitor.apply_usage({'rateLimits':{'primary':{'usedPercent':79},'planType':'prolite'}})
+                self.assertEqual(monitor.snapshot['usageState'],'live')
+                self.assertTrue(worker.is_alive())
+            finally:release.set();worker.join(1)
     def test_never_use_another_model_bucket(self):
         monitor=self.monitor();monitor.apply_usage({'rateLimits':{'primary':{'usedPercent':0}},'rateLimitsByLimitId':{'other':{'primary':{'usedPercent':4}}}})
         self.assertEqual(monitor.snapshot['usageState'],'unavailable')

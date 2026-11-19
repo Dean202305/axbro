@@ -28,7 +28,7 @@ import Foundation
         check(manual.tick(now: 400) == [.resetDue], "New deadline fires")
         var weekly = ReminderPolicy()
         _ = weekly.observe(remaining: 100, resetAt: 200, windowMinutes: 10080, fresh: true, now: 100)
-        check(weekly.tick(now: 200).isEmpty, "Weekly window is not a 5-hour reset")
+        check(weekly.tick(now: 200) == [.resetDue], "Actual weekly window also supports its reset deadline")
         print("Passed \(checks) reminder checks")
     }
 }

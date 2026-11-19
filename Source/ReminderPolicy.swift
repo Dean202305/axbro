@@ -20,7 +20,7 @@ struct ReminderPolicy {
         var events = tick(now: now)
         guard fresh else { return events }
         let deadline = resetAt.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
-        if windowMinutes == 300, let deadline = deadline, deadline > now {
+        if let minutes = windowMinutes, minutes > 0, let deadline = deadline, deadline > now {
             pendingReset = deadline
         } else {
             pendingReset = nil

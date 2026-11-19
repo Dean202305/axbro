@@ -2,29 +2,6 @@ import AppKit
 import SwiftUI
 import Combine
 
-struct QuotaWindow: Decodable {
-    let usedPercent: Double
-    let windowDurationMins: Int?
-    let resetsAt: Double?
-    var remaining: Double { max(0, min(100, 100 - usedPercent)) }
-    var percent: String { "\(Int(remaining.rounded()))%" }
-    var resetDate: Date? { resetsAt.map(Date.init(timeIntervalSince1970:)) }
-    var label: String {
-        guard let minutes = windowDurationMins else { return "当前窗口剩余用量" }
-        if minutes == 10080 { return "每周剩余" }
-        if minutes % 60 == 0 { return "\(minutes / 60) 小时剩余用量" }
-        return "\(minutes) 分钟剩余用量"
-    }
-}
-
-struct Usage: Decodable {
-    let primary: QuotaWindow?
-    let secondary: QuotaWindow?
-    let resetCount: Int?
-    let plan: String?
-    let allowed: Bool?
-}
-
 struct LocalTaskState: Decodable {
     let count: Int?
     let state: String
@@ -162,7 +139,7 @@ final class Telemetry: ObservableObject {
                     self.buffer.removeSubrange(...newline)
                     if let snapshot = try? JSONDecoder().decode(Snapshot.self, from: line) {
                         self.snapshot = snapshot
-                        let window = snapshot.usage?.primary
+                        let window = snapshot.usage?.mainWindow
                         let remaining = window.flatMap { $0.usedPercent.isFinite && $0.usedPercent >= 0 && $0.usedPercent <= 100 ? $0.remaining : nil }
                         let events = self.reminders.observe(remaining: remaining, resetAt: window?.resetsAt,
                                                             windowMinutes: window?.windowDurationMins,
@@ -391,7 +368,7 @@ struct Dashboard: View {
         return formatter.string(from: date)
     }
     private var countdown: String {
-        guard let date = snapshot.usage?.primary?.resetDate else { return "--:--:--" }
+        guard let date = snapshot.usage?.mainWindow?.resetDate else { return "--:--:--" }
         let seconds = Int(date.timeIntervalSince(model.now))
         if seconds <= 0 { return "等待更新" }
         let days = seconds / 86400
@@ -432,7 +409,7 @@ struct Dashboard: View {
         return image
     }()
     private var primaryCaption: String {
-        snapshot.usage?.primary?.label.replacingOccurrences(of: "用量", with: "") ?? "5 小时剩余"
+        snapshot.usage?.mainWindow?.label.replacingOccurrences(of: "用量", with: "") ?? "额度待同步"
     }
     private var weatherColumn: some View {
         let presentation = weather.reading?.presentation(at: model.now) ?? WeatherPresentation.make(code: nil, isDay: true)
@@ -508,8 +485,18 @@ struct Dashboard: View {
             }.frame(height: 22).padding(.bottom, 6)
 
             HStack(alignment: .top, spacing: 19) {
-                QuotaRing(window: snapshot.usage?.primary, stale: stale, caption: primaryCaption, lineWidth: 8)
-                QuotaRing(window: snapshot.usage?.secondary, stale: stale, caption: snapshot.usage?.secondary?.label ?? "每周剩余", emphasis: 0.82, lineWidth: 6)
+                QuotaRing(window: snapshot.usage?.mainWindow, stale: stale, caption: primaryCaption, lineWidth: 8)
+                if let other = snapshot.usage?.otherWindow {
+                    QuotaRing(window: other, stale: stale, caption: other.label, emphasis: 0.82, lineWidth: 6)
+                } else {
+                    VStack(spacing: 6) {
+                        Text(snapshot.usage?.planTitle ?? "连接中").font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(Palette.green).lineLimit(1).minimumScaleFactor(0.7)
+                        Text(snapshot.usage?.mainWindow.map { "已用 \(Int($0.usedPercent.rounded()))%" } ?? "等待额度")
+                            .font(.system(size: 10)).foregroundColor(Palette.secondary)
+                        Text("当前套餐").font(.system(size: 9)).foregroundColor(Palette.secondary)
+                    }.frame(width: 82, height: 78).help("套餐由 Codex 实时返回：" + (snapshot.usage?.plan ?? "未知"))
+                }
                 weatherColumn
             }.frame(height: 92).padding(.bottom, 4)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -521,8 +508,13 @@ struct Dashboard: View {
             }.font(.system(size: 10.5)).lineLimit(1).minimumScaleFactor(0.8).frame(height: 20)
             Rectangle().fill(Palette.line).frame(height: 1).padding(.vertical, 5)
             VStack(spacing: 4) {
-                resetRow("本轮重置", snapshot.usage?.primary)
-                resetRow("每周重置", snapshot.usage?.secondary)
+                resetRow("下次重置", snapshot.usage?.mainWindow)
+                if let other = snapshot.usage?.otherWindow {
+                    resetRow(other.windowDurationMins == 10080 ? "每周重置" : "其他额度重置", other)
+                } else {
+                    HStack { Text("计量周期").foregroundColor(Palette.secondary); Spacer(); Text(snapshot.usage?.mainWindow?.period ?? "未提供") }
+                        .font(.system(size: 10)).frame(height: 12)
+                }
             }.padding(.bottom, 8)
             if !snapshot.usageMessage.isEmpty {
                 Text(snapshot.usageMessage).font(.system(size: 10)).foregroundColor(Palette.amber)
@@ -714,7 +706,7 @@ struct AboutView: View {
             }
             Divider()
             aboutText("本机监测", "仅支持 Codex，每 5 秒刷新用量与任务状态，随 Codex 启动和退出。")
-            aboutText("声音提醒", "剩余用量低于 5%、5 小时额度重置时提醒。点击系统提示音即可播放并保存。")
+            aboutText("声音提醒", "剩余用量低于 5%、当前额度窗口重置时提醒。点击系统提示音即可播放并保存。")
             aboutText("任务统计", "仅统计当前用户本机日志，等待输入可能计入。运行不代表持续消耗；不含云端、其他设备及内部子代理。")
             aboutText("数据与环境", "仅使用安装者本机数据，不附带他人账号或聊天记录。需要已登录的 Codex 与 Python 3。")
         }.font(.system(size: 11)).padding(12).frame(width: 270)
@@ -846,12 +838,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func updateStatus() {
         guard let button = statusItem?.button else { return }
         let snapshot = model.snapshot
-        let indicator = StatusQuotaIndicator(remaining: snapshot.usage?.primary?.remaining,
+        let indicator = StatusQuotaIndicator(remaining: snapshot.usage?.mainWindow?.remaining,
                                              isStale: snapshot.usageState != "live")
         button.image = indicator.image(for: button)
         button.needsDisplay = true
         let freshness = indicator.showsStaleMarker ? "，上次数据" : ""
-        let label = snapshot.usage?.primary?.label ?? "剩余用量"
+        let label = snapshot.usage?.mainWindow?.label ?? "剩余用量"
         button.toolTip = "axbro · \(label)：\(indicator.percentText)\(freshness)\n\(snapshot.tasks.title)\n悬停或点击展开看板"
         button.setAccessibilityValue("Codex，剩余用量 \(indicator.percentText)\(freshness)，\(snapshot.tasks.title)")
     }
@@ -1081,7 +1073,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func checkSmokeTest() {
         guard CommandLine.arguments.contains("--smoke-test"), !smokeStarted,
-              model.snapshot.usageState == "live", model.snapshot.tasks.count != nil else { return }
+              model.snapshot.usageState == "live" else { return }
         smokeStarted = true
         showPanel(pinned: false)
         hoverWatch?.invalidate() // Test the hover-open state without moving the user's pointer.
@@ -1128,7 +1120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                                    "soundListOpened": soundListOpened, "settingsOpened": settingsOpened, "settingsStaysOpen": settingsStaysOpen,
                                    "escapeClosed": !panel.isVisible, "width": size.width, "height": size.height,
                                    "clockTicks": clockTicks, "codexMenuWired": menuWired, "statusIconVisible": statusIconVisible,
-                                   "quotaLive": self.model.snapshot.usageState == "live"])
+                                   "quotaLive": self.model.snapshot.usageState == "live", "taskCountKnown": self.model.snapshot.tasks.count != nil])
         }
     }
 

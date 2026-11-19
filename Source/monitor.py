@@ -10,6 +10,8 @@ import sqlite3
 import subprocess
 import sys
 import time
+import threading
+import queue
 sys.dont_write_bytecode = True  # Keep the signed application bundle read-only.
 
 HOME = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex')))
@@ -176,6 +178,8 @@ class Monitor:
         self.usage_due = 0
         self.tasks_due = 0
         self.tasks = LocalTasks()
+        self.task_worker = None
+        self.task_results = queue.Queue()
         self.snapshot = {'kind': 'snapshot', 'usage': None, 'usageUpdatedAt': None,
                          'usageState': 'loading', 'usageMessage': '正在连接 Codex…',
                          'tasks': {'count': None, 'state': 'loading', 'detail': '正在读取本机任务状态…'}}
@@ -225,7 +229,7 @@ class Monitor:
                                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0)
             os.set_blocking(self.process.stdout.fileno(), False)
             self.selector.register(self.process.stdout, selectors.EVENT_READ, 'server')
-            self.send('initialize', {'clientInfo': {'name': 'axbro', 'title': 'axbro', 'version': '1.16.0'},
+            self.send('initialize', {'clientInfo': {'name': 'axbro', 'title': 'axbro', 'version': '1.19.0'},
                                      'capabilities': {'experimentalApi': True}})
         except OSError:
             self.close_server()
@@ -283,6 +287,13 @@ class Monitor:
                              usageUpdatedAt=time.time(), usageState='live', usageMessage='')
         self.emit()
 
+    def collect_tasks(self, pid):
+        try:
+            tasks = self.tasks.scan(pid)
+        except Exception:
+            tasks = {'count': None, 'state': 'unknown', 'detail': '任务统计暂不可用，额度读取不受影响。'}
+        self.task_results.put(tasks)
+
     def run(self):
         os.set_blocking(sys.stdin.fileno(), False)
         self.selector.register(sys.stdin, selectors.EVENT_READ, 'input')
@@ -304,11 +315,17 @@ class Monitor:
                     elif self.ready and now >= self.usage_due and not any(m == 'account/rateLimits/read' for m, _ in self.pending.values()):
                         self.send('account/rateLimits/read')
                         self.usage_due = now + 5
-                if now >= self.tasks_due:
-                    tasks = self.tasks.scan(self.process.pid if self.process else -1)
+                try:
+                    tasks = self.task_results.get_nowait()
                     if tasks != self.snapshot['tasks']:
                         self.snapshot['tasks'] = tasks
                         self.emit()
+                except queue.Empty:
+                    pass
+                if now >= self.tasks_due and (self.task_worker is None or not self.task_worker.is_alive()):
+                    observer_pid = self.process.pid if self.process else -1
+                    self.task_worker = threading.Thread(target=self.collect_tasks, args=(observer_pid,), daemon=True)
+                    self.task_worker.start()
                     self.tasks_due = now + 5
                 for key, _ in self.selector.select(timeout=0.5):
                     if key.data == 'input':
